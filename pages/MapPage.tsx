@@ -1,5 +1,4 @@
 
-
 import React, { useEffect, useState } from 'react';
 import Layout from '../components/Layout';
 import { MapContainer, TileLayer, Marker, Popup, useMap } from 'react-leaflet';
@@ -71,6 +70,13 @@ const MapPage: React.FC = () => {
   
   const centerPos: [number, number] = user?.lat && user?.lng ? [user.lat, user.lng] : [-27.5969, -48.5495];
 
+  const roleNames: Record<string, string> = {
+    ADMIN: 'Administrador',
+    INTEGRATOR: 'Integrador',
+    SCR: 'Motovigia',
+    RESIDENT: 'Morador'
+  };
+
   useEffect(() => {
     const fetchData = async () => {
         const usersData = await MockService.getUsers();
@@ -111,7 +117,9 @@ const MapPage: React.FC = () => {
                         <Marker key={`user-${u.id}`} position={[u.lat, u.lng]}>
                             <Popup className="text-black">
                                 <strong className="block text-sm mb-1">{u.name}</strong>
-                                <span className="text-xs uppercase bg-gray-200 px-1 rounded">{u.role}</span>
+                                <span className="text-xs uppercase bg-gray-200 px-1 rounded">
+                                    {u.role ? roleNames[u.role] : u.role}
+                                </span>
                             </Popup>
                         </Marker>
                     )

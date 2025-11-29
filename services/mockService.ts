@@ -51,7 +51,8 @@ export const MockService = {
         const hoods = (data || []).map(n => ({
           id: n.id,
           name: n.name,
-          iframeUrl: n.iframe_url,
+          // Verifica ambas as colunas para garantir compatibilidade
+          iframeUrl: n.iframe_url || n.camera_url || '', 
           lat: n.lat,
           lng: n.lng
         }));
@@ -65,26 +66,40 @@ export const MockService = {
   },
 
   getNeighborhoodById: async (id: string): Promise<Neighborhood | undefined> => {
+    // Tenta cache primeiro
     if (cachedNeighborhoods) {
         const found = cachedNeighborhoods.find(n => n.id === id);
         if (found) return found;
     }
 
-    const { data } = await supabase.from('neighborhoods').select('*').eq('id', id).single();
-    if (!data) return undefined;
-    return {
-      id: data.id,
-      name: data.name,
-      iframeUrl: data.iframe_url,
-      lat: data.lat,
-      lng: data.lng
-    };
+    // Busca direta segura
+    try {
+        const { data, error } = await supabase.from('neighborhoods').select('*').eq('id', id).maybeSingle();
+        
+        if (error || !data) {
+            console.warn("Bairro não encontrado no banco:", id);
+            return undefined;
+        }
+
+        return {
+            id: data.id,
+            name: data.name,
+            iframeUrl: data.iframe_url || data.camera_url || '',
+            lat: data.lat,
+            lng: data.lng
+        };
+    } catch (e) {
+        console.error("Erro ao buscar bairro por ID:", e);
+        return undefined;
+    }
   },
 
   createNeighborhood: async (name: string, iframeUrl: string, lat?: number, lng?: number): Promise<Neighborhood> => {
+    // Salva em ambas as colunas se existirem, ou prefere iframe_url
     const { data, error } = await supabase.from('neighborhoods').insert([{
       name,
       iframe_url: iframeUrl,
+      // camera_url: iframeUrl, // Opcional dependendo da estrutura atual
       lat,
       lng
     }]).select().single();
@@ -95,17 +110,25 @@ export const MockService = {
     return {
       id: data.id,
       name: data.name,
-      iframeUrl: data.iframe_url,
+      iframeUrl: data.iframe_url || data.camera_url,
       lat: data.lat,
       lng: data.lng
     };
   },
 
   deleteNeighborhood: async (id: string): Promise<void> => {
+      // Primeiro tenta limpar dependências manualmente se o CASCADE falhar
+      try {
+          await supabase.from('alerts').delete().eq('neighborhood_id', id);
+          await supabase.from('chat_messages').delete().eq('neighborhood_id', id);
+      } catch (e) {
+          console.warn("Erro ao limpar dependências manualmente, confiando no CASCADE...", e);
+      }
+
       const { error } = await supabase.from('neighborhoods').delete().eq('id', id);
       if (error) {
           console.error("Erro ao excluir bairro:", error);
-          throw new Error(error.message); // Propagate actual Supabase error message
+          throw new Error("Erro ao excluir. Verifique se existem vínculos impedindo a ação. Detalhe: " + error.message);
       }
       cachedNeighborhoods = null;
   },
@@ -113,8 +136,10 @@ export const MockService = {
   // --- ALERTS ---
   getAlerts: async (neighborhoodId?: string): Promise<Alert[]> => {
     let query = supabase.from('alerts').select('*').order('timestamp', { ascending: false }).limit(50);
-    if (neighborhoodId) {
-      query = query.eq('neighborhood_id', neighborhoodId);
+    const safeNeighborhoodId = sanitizeUUID(neighborhoodId);
+
+    if (safeNeighborhoodId) {
+      query = query.eq('neighborhood_id', safeNeighborhoodId);
     }
     const { data } = await query;
     return (data || []).map(a => ({
@@ -143,7 +168,7 @@ export const MockService = {
 
     if (error) {
         console.error("Erro ao criar alerta:", error);
-        throw error; // Propagate error but handle nicely in UI
+        throw error;
     }
 
     // Auto-post to chat (Fire and Forget - Silent Catch)
@@ -166,7 +191,6 @@ export const MockService = {
             image: alert.image
         }]);
     } catch (chatError) {
-        // Silent catch for chat logging issues to prevent blocking the alert flow
         console.warn("Falha não-crítica ao postar alerta no chat:", chatError);
     }
 
@@ -231,7 +255,6 @@ export const MockService = {
     if (safeNeighborhoodId) {
         query = query.eq('neighborhood_id', safeNeighborhoodId);
     } else {
-        // Fallback for global or null neighborhood messages if desired
         query = query.is('neighborhood_id', null);
     }
 
@@ -262,7 +285,10 @@ export const MockService = {
       text: msg.text
     }]).select().single();
 
-    if (error) throw error;
+    if (error) {
+        console.error("Erro ao enviar mensagem:", error);
+        throw error;
+    }
     
     return {
       id: data.id,

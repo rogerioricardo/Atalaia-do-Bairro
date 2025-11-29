@@ -4,12 +4,14 @@ import Layout from '../components/Layout';
 import { useAuth } from '../context/AuthContext';
 import { Card, Input, Button } from '../components/UI';
 import { MockService } from '../services/mockService';
-import { Save, User as UserIcon, Camera, Home, MapPin } from 'lucide-react';
+import { Save, User as UserIcon, Camera, Home, MapPin, CheckCircle } from 'lucide-react';
 
 const Profile: React.FC = () => {
   const { user, updateProfile } = useAuth();
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [neighborhoodName, setNeighborhoodName] = useState('Carregando...');
+  const [showSuccess, setShowSuccess] = useState(false);
+  const [saving, setSaving] = useState(false);
   
   const [formData, setFormData] = useState({
     name: user?.name || '',
@@ -22,6 +24,13 @@ const Profile: React.FC = () => {
     phone: user?.phone || '+55 ',
     photoUrl: user?.photoUrl || ''
   });
+
+  const roleNames: Record<string, string> = {
+    ADMIN: 'Administrador',
+    INTEGRATOR: 'Integrador',
+    SCR: 'Motovigia',
+    RESIDENT: 'Morador'
+  };
 
   useEffect(() => {
     const loadNeighborhood = async () => {
@@ -37,21 +46,32 @@ const Profile: React.FC = () => {
     loadNeighborhood();
   }, [user]);
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    updateProfile({
-        name: formData.name,
-        // Email usually isn't editable for auth reasons in simple demos, but logic is here
-        // email: formData.email, 
-        lat: parseFloat(formData.lat) || undefined,
-        lng: parseFloat(formData.lng) || undefined,
-        address: formData.address,
-        city: formData.city,
-        state: formData.state,
-        phone: formData.phone,
-        photoUrl: formData.photoUrl
-    });
-    alert('Perfil atualizado com sucesso!');
+    setSaving(true);
+    try {
+        await updateProfile({
+            name: formData.name,
+            // Email usually isn't editable for auth reasons in simple demos, but logic is here
+            // email: formData.email, 
+            lat: parseFloat(formData.lat) || undefined,
+            lng: parseFloat(formData.lng) || undefined,
+            address: formData.address,
+            city: formData.city,
+            state: formData.state,
+            phone: formData.phone,
+            photoUrl: formData.photoUrl
+        });
+        
+        // Show success state
+        setShowSuccess(true);
+        setTimeout(() => setShowSuccess(false), 3000);
+    } catch (error) {
+        console.error(error);
+        alert('Erro ao salvar perfil.');
+    } finally {
+        setSaving(false);
+    }
   };
 
   const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -106,7 +126,9 @@ const Profile: React.FC = () => {
                     </div>
 
                     <h2 className="text-xl font-bold text-white">{user?.name}</h2>
-                    <p className="text-atalaia-neon text-sm font-medium mb-4">{user?.role}</p>
+                    <p className="text-atalaia-neon text-sm font-medium mb-4">
+                        {user?.role ? roleNames[user.role] : ''}
+                    </p>
 
                     <div className="text-left space-y-4 pt-4 border-t border-white/5">
                         <div>
@@ -227,9 +249,27 @@ const Profile: React.FC = () => {
                         </div>
                     </div>
 
-                    <div className="pt-8 flex justify-end">
-                        <Button type="submit" className="px-8 py-3">
-                            <Save size={18} /> Salvar Alterações
+                    <div className="pt-8 flex items-center justify-end gap-4">
+                        {showSuccess && (
+                            <div className="flex items-center gap-2 text-green-500 animate-in fade-in slide-in-from-right-2">
+                                <CheckCircle size={18} />
+                                <span className="font-bold text-sm">Dados atualizados com sucesso!</span>
+                            </div>
+                        )}
+                        <Button 
+                            type="submit" 
+                            disabled={saving}
+                            className={`px-8 py-3 transition-all duration-300 ${showSuccess ? 'bg-green-500 hover:bg-green-600 text-white shadow-green-500/20' : ''}`}
+                        >
+                            {showSuccess ? (
+                                <>
+                                    <CheckCircle size={18} /> Salvo!
+                                </>
+                            ) : (
+                                <>
+                                    <Save size={18} /> {saving ? 'Salvando...' : 'Salvar Alterações'}
+                                </>
+                            )}
                         </Button>
                     </div>
                 </Card>

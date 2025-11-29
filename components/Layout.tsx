@@ -32,6 +32,13 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
     navigate('/');
   };
 
+  const roleNames: Record<string, string> = {
+    ADMIN: 'Administrador',
+    INTEGRATOR: 'Integrador',
+    SCR: 'Motovigia',
+    RESIDENT: 'Morador'
+  };
+
   const NavItem = ({ to, icon: Icon, label }: { to: string, icon: any, label: string }) => {
     const isActive = location.pathname === to;
     return (
@@ -124,7 +131,9 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
             </div>
             <div className="flex-1 min-w-0">
               <p className="text-sm font-medium text-white truncate group-hover:text-atalaia-neon transition-colors">{user?.name}</p>
-              <p className="text-xs text-gray-500 truncate capitalize">{user?.role?.toLowerCase()}</p>
+              <p className="text-xs text-gray-500 truncate capitalize">
+                {user?.role ? roleNames[user.role] : ''}
+              </p>
             </div>
           </Link>
           <button 

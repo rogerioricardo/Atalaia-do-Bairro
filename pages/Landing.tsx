@@ -1,7 +1,7 @@
 
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { ShieldCheck, Zap, MessageSquare, Users, MapPin, Bell, Clock, BarChart3, MessageCircle, Menu, X } from 'lucide-react';
+import { ShieldCheck, Zap, MessageSquare, Users, MapPin, Bell, Clock, BarChart3, MessageCircle, Menu, X, Lock, CreditCard, CheckCircle } from 'lucide-react';
 import { Button } from '../components/UI';
 
 const Landing: React.FC = () => {
@@ -37,7 +37,6 @@ const Landing: React.FC = () => {
             </div>
             
             <div className="hidden md:flex items-center gap-4">
-               {/* Botão de Cadastro removido do topo conforme solicitado */}
                {/* Botão de Login transformado em botão principal verde */}
                <Button onClick={handleLogin} variant="primary" className="px-6 py-2 text-sm font-bold">
                  Login
@@ -191,7 +190,7 @@ const Landing: React.FC = () => {
             <p className="text-gray-400">Atualizar para desbloquear recursos avançados de segurança</p>
           </div>
 
-          <div className="grid md:grid-cols-3 gap-8 max-w-6xl mx-auto items-start">
+          <div className="grid md:grid-cols-3 gap-8 max-w-6xl mx-auto items-start mb-16">
             {/* Gratuito */}
             <div className="bg-[#111] border border-white/5 rounded-2xl p-8">
               <h3 className="text-xl font-bold text-white mb-2">Gratuito</h3>
@@ -211,7 +210,7 @@ const Landing: React.FC = () => {
                   <span className="text-atalaia-neon">✓</span> Histórico de 7 dias
                 </li>
                 <li className="flex items-center gap-3 text-gray-300">
-                  <span className="text-atalaia-neon">✓</span> r por e-mail
+                  <span className="text-atalaia-neon">✓</span> Suporte por e-mail
                 </li>
               </ul>
               <button onClick={() => navigate('/login?mode=register&plan=FREE')} className="w-full py-3 rounded-lg border border-white/10 text-white hover:border-atalaia-neon hover:text-atalaia-neon transition-colors text-sm font-medium">
@@ -223,7 +222,7 @@ const Landing: React.FC = () => {
             <div className="bg-[#111] border border-atalaia-neon rounded-2xl p-8 relative transform md:-translate-y-4">
               <div className="absolute -top-4 left-1/2 -translate-x-1/2 bg-atalaia-neon text-black text-[10px] font-bold px-3 py-1 rounded-full uppercase tracking-wider">Popular</div>
               <h3 className="text-xl font-bold text-white mb-2">Família</h3>
-              <p className="text-xs text-gray-500 mb-6">acerto para famílias</p>
+              <p className="text-xs text-gray-500 mb-6">Acesso para famílias</p>
               <div className="flex items-end gap-1 mb-6">
                 <span className="text-4xl font-bold text-atalaia-neon">R$ 39,90</span>
                 <span className="text-sm text-gray-500 mb-1">/mês</span>
@@ -245,13 +244,10 @@ const Landing: React.FC = () => {
                   <span className="text-atalaia-neon">✓</span> Histórico de 30 dias
                 </li>
                 <li className="flex items-center gap-3 text-white">
-                  <span className="text-atalaia-neon">✓</span> Até 3 anos
+                  <span className="text-atalaia-neon">✓</span> Prioritário
                 </li>
                 <li className="flex items-center gap-3 text-white">
-                  <span className="text-atalaia-neon">✓</span> prioritário
-                </li>
-                <li className="flex items-center gap-3 text-white">
-                  <span className="text-atalaia-neon">✓</span> Backup em
+                  <span className="text-atalaia-neon">✓</span> Backup em Nuvem
                 </li>
               </ul>
               <Button onClick={() => navigate('/login?mode=register&plan=FAMILY')} className="w-full py-3">
@@ -281,7 +277,7 @@ const Landing: React.FC = () => {
                   <span className="text-atalaia-neon">✓</span> Relatórios personalizados
                 </li>
                 <li className="flex items-center gap-3 text-gray-300">
-                  <span className="text-atalaia-neon">✓</span> Suporte 24 horas por dia, 7 dias por semana
+                  <span className="text-atalaia-neon">✓</span> Suporte 24 horas por dia
                 </li>
                 <li className="flex items-center gap-3 text-gray-300">
                   <span className="text-atalaia-neon">✓</span> Integração com sistemas externos
@@ -294,7 +290,33 @@ const Landing: React.FC = () => {
                 Premium
               </button>
             </div>
+          </div>
 
+          {/* Mercado Pago Badge Melhorado */}
+          <div className="max-w-2xl mx-auto bg-[#111] border border-white/10 rounded-2xl p-6 flex flex-col items-center text-center">
+               <p className="text-xs text-gray-400 mb-4 uppercase tracking-widest font-semibold flex items-center gap-2">
+                   <Lock size={14} className="text-atalaia-neon" /> Pagamentos Processados com Segurança
+               </p>
+               
+               <div className="bg-white px-8 py-4 rounded-xl shadow-[0_0_25px_rgba(255,255,255,0.05)] mb-6 transition-transform hover:scale-105">
+                   <img 
+                        src="https://logodownload.org/wp-content/uploads/2019/06/mercado-pago-logo.png" 
+                        alt="Mercado Pago" 
+                        className="h-8 object-contain"
+                   />
+               </div>
+
+               <div className="flex flex-wrap justify-center gap-6 text-sm text-gray-400">
+                    <span className="flex items-center gap-2">
+                        <span className="text-atalaia-neon">💠</span> Pix (Aprovação Imediata)
+                    </span>
+                    <span className="flex items-center gap-2">
+                        <CreditCard size={16} className="text-atalaia-neon" /> Cartão de Crédito
+                    </span>
+                    <span className="flex items-center gap-2">
+                        <ShieldCheck size={16} className="text-atalaia-neon" /> Ambiente Criptografado
+                    </span>
+               </div>
           </div>
         </div>
       </section>

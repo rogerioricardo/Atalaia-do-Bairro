@@ -4,14 +4,16 @@ import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { UserRole, Neighborhood } from '../types';
 import { Button, Input, Card } from '../components/UI';
-import { ShieldCheck, ArrowLeft, AlertCircle, MapPin, CheckCircle, RefreshCw } from 'lucide-react';
+import { ShieldCheck, ArrowLeft, AlertCircle, MapPin, CheckCircle, RefreshCw, CreditCard } from 'lucide-react';
 import { MockService } from '../services/mockService';
+import { PaymentService } from '../services/paymentService';
 
 const Login: React.FC = () => {
   const { login } = useAuth();
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const [isRegister, setIsRegister] = useState(searchParams.get('mode') === 'register');
+  const planParam = searchParams.get('plan');
   
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
@@ -24,6 +26,7 @@ const Login: React.FC = () => {
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
   const [loading, setLoading] = useState(false);
+  const [redirectingToPay, setRedirectingToPay] = useState(false);
 
   const loadHoods = async (force = false) => {
       setLoadingHoods(true);
@@ -54,19 +57,35 @@ const Login: React.FC = () => {
           if (!selectedNeighborhoodId && role !== UserRole.ADMIN) {
               throw new Error('Por favor, selecione seu bairro.');
           }
+          
+          // 1. Cria a conta no Supabase
           await login(email, password, role, name, selectedNeighborhoodId);
+          
+          // 2. Verifica se é um plano pago
+          if (planParam && (planParam === 'FAMILY' || planParam === 'PREMIUM')) {
+              setSuccess('Cadastro realizado! Gerando pagamento...');
+              setRedirectingToPay(true);
+              
+              // Gera link do Mercado Pago
+              const checkoutUrl = await PaymentService.createPreference(planParam, email, name);
+              
+              // Redireciona
+              window.location.href = checkoutUrl;
+              return; // PAUSA AQUI para não ir pro dashboard
+          }
+
           setSuccess('Cadastro realizado! Entrando...');
           setTimeout(() => navigate('/dashboard'), 1000);
       } else {
           await login(email, password);
           setSuccess('Acesso autorizado!');
-          // Redirecionamento rápido pois o contexto já atualizou
           setTimeout(() => navigate('/dashboard'), 500);
       }
     } catch (err: any) {
         console.error(err);
         setError(err.message || 'Falha na autenticação. Verifique senha ou internet.');
         setLoading(false);
+        setRedirectingToPay(false);
     }
   };
 
@@ -93,6 +112,12 @@ const Login: React.FC = () => {
           <p className="text-gray-500 text-sm mt-2">
             {isRegister ? 'Segurança colaborativa inteligente.' : 'Entre para monitorar sua comunidade.'}
           </p>
+          {isRegister && planParam && planParam !== 'FREE' && (
+              <div className="mt-4 bg-atalaia-neon/10 border border-atalaia-neon/30 text-atalaia-neon px-4 py-2 rounded-lg text-sm font-bold flex items-center justify-center gap-2">
+                  <CreditCard size={16} />
+                  Assinando Plano {planParam === 'FAMILY' ? 'Família' : 'Prêmio'}
+              </div>
+          )}
         </div>
 
         {error && (
@@ -109,97 +134,107 @@ const Login: React.FC = () => {
             </div>
         )}
 
-        <form onSubmit={handleSubmit} className="space-y-4">
-          {isRegister && (
-             <Input 
-                label="Nome Completo" 
-                placeholder="Seu Nome" 
-                value={name}
-                onChange={(e) => setName(e.target.value)}
-                required={isRegister}
-              />
-          )}
+        {redirectingToPay ? (
+            <div className="text-center py-8">
+                <RefreshCw size={32} className="animate-spin text-atalaia-neon mx-auto mb-4" />
+                <p className="text-white font-bold">Redirecionando para o Mercado Pago...</p>
+                <p className="text-gray-500 text-sm mt-2">Por favor, aguarde.</p>
+            </div>
+        ) : (
+            <form onSubmit={handleSubmit} className="space-y-4">
+            {isRegister && (
+                <Input 
+                    label="Nome Completo" 
+                    placeholder="Seu Nome" 
+                    value={name}
+                    onChange={(e) => setName(e.target.value)}
+                    required={isRegister}
+                />
+            )}
 
-          <Input 
-            label="Email" 
-            type="email" 
-            placeholder="seu@email.com" 
-            value={email}
-            onChange={(e) => setEmail(e.target.value)}
-            required
-          />
-          
-          <Input 
-            label="Senha" 
-            type="password" 
-            placeholder="••••••••" 
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            required
-            minLength={6}
-          />
+            <Input 
+                label="Email" 
+                type="email" 
+                placeholder="seu@email.com" 
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                required
+            />
+            
+            <Input 
+                label="Senha" 
+                type="password" 
+                placeholder="••••••••" 
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                required
+                minLength={6}
+            />
 
-          {isRegister && (
-            <>
-                <div className="space-y-2">
-                    <div className="flex justify-between items-center">
-                        <label className="block text-xs font-medium text-gray-400 uppercase tracking-wider flex items-center gap-1">
-                            <MapPin size={12} /> Bairro
-                        </label>
-                        <button 
-                            type="button" 
-                            onClick={() => loadHoods(true)} 
+            {isRegister && (
+                <>
+                    <div className="space-y-2">
+                        <div className="flex justify-between items-center">
+                            <label className="block text-xs font-medium text-gray-400 uppercase tracking-wider flex items-center gap-1">
+                                <MapPin size={12} /> Bairro
+                            </label>
+                            <button 
+                                type="button" 
+                                onClick={() => loadHoods(true)} 
+                                disabled={loadingHoods}
+                                className="text-xs text-atalaia-neon hover:text-white flex items-center gap-1"
+                            >
+                                <RefreshCw size={10} className={loadingHoods ? "animate-spin" : ""} /> Atualizar
+                            </button>
+                        </div>
+                        <select 
+                            className="w-full bg-black/50 border border-atalaia-border rounded-lg px-4 py-2.5 text-white focus:border-atalaia-neon focus:outline-none disabled:opacity-50"
+                            value={selectedNeighborhoodId}
+                            onChange={(e) => setSelectedNeighborhoodId(e.target.value)}
+                            required
                             disabled={loadingHoods}
-                            className="text-xs text-atalaia-neon hover:text-white flex items-center gap-1"
                         >
-                            <RefreshCw size={10} className={loadingHoods ? "animate-spin" : ""} /> Atualizar
-                        </button>
-                    </div>
-                    <select 
-                        className="w-full bg-black/50 border border-atalaia-border rounded-lg px-4 py-2.5 text-white focus:border-atalaia-neon focus:outline-none disabled:opacity-50"
-                        value={selectedNeighborhoodId}
-                        onChange={(e) => setSelectedNeighborhoodId(e.target.value)}
-                        required
-                        disabled={loadingHoods}
-                    >
-                        <option value="" disabled>
-                            {loadingHoods ? 'Carregando bairros...' : 'Selecione seu bairro'}
-                        </option>
-                        {neighborhoods.map(hood => (
-                            <option key={hood.id} value={hood.id}>
-                                {hood.name}
+                            <option value="" disabled>
+                                {loadingHoods ? 'Carregando bairros...' : 'Selecione seu bairro'}
                             </option>
-                        ))}
-                    </select>
-                </div>
+                            {neighborhoods.map(hood => (
+                                <option key={hood.id} value={hood.id}>
+                                    {hood.name}
+                                </option>
+                            ))}
+                        </select>
+                    </div>
 
-                <div className="space-y-2">
-                    <label className="block text-xs font-medium text-gray-400 uppercase tracking-wider">Perfil</label>
-                    <select 
-                    className="w-full bg-black/50 border border-atalaia-border rounded-lg px-4 py-2.5 text-white focus:border-atalaia-neon focus:outline-none"
-                    value={role}
-                    onChange={(e) => setRole(e.target.value as UserRole)}
-                    >
-                    <option value={UserRole.INTEGRATOR}>Integrador</option>
-                    <option value={UserRole.SCR}>SCR (Motovigia)</option>
-                    <option value={UserRole.RESIDENT}>Morador</option>
-                    </select>
-                </div>
-            </>
-          )}
+                    <div className="space-y-2">
+                        <label className="block text-xs font-medium text-gray-400 uppercase tracking-wider">Perfil</label>
+                        <select 
+                        className="w-full bg-black/50 border border-atalaia-border rounded-lg px-4 py-2.5 text-white focus:border-atalaia-neon focus:outline-none"
+                        value={role}
+                        onChange={(e) => setRole(e.target.value as UserRole)}
+                        >
+                        <option value={UserRole.INTEGRATOR}>Integrador</option>
+                        <option value={UserRole.SCR}>SCR (Motovigia)</option>
+                        <option value={UserRole.RESIDENT}>Morador</option>
+                        </select>
+                    </div>
+                </>
+            )}
 
-          <Button type="submit" className={`w-full h-12 text-lg mt-6 ${success ? 'bg-green-500 text-white' : ''}`} disabled={loading || !!success}>
-            {loading ? 'Autenticando...' : success ? 'Sucesso!' : (isRegister ? 'Cadastrar' : 'Entrar no Sistema')}
-          </Button>
-        </form>
+            <Button type="submit" className={`w-full h-12 text-lg mt-6 ${success ? 'bg-green-500 text-white' : ''}`} disabled={loading || !!success}>
+                {loading ? 'Processando...' : success ? 'Sucesso!' : (isRegister ? (planParam && planParam !== 'FREE' ? 'Cadastrar e Pagar' : 'Cadastrar') : 'Entrar no Sistema')}
+            </Button>
+            </form>
+        )}
 
         <div className="mt-6 text-center">
-          <button 
-            onClick={() => { setIsRegister(!isRegister); setError(''); setSuccess(''); }}
-            className="text-sm text-gray-400 hover:text-atalaia-neon transition-colors"
-          >
-            {isRegister ? 'Já tem conta? Faça login' : 'Não tem conta? Crie agora'}
-          </button>
+          {!redirectingToPay && (
+            <button 
+                onClick={() => { setIsRegister(!isRegister); setError(''); setSuccess(''); }}
+                className="text-sm text-gray-400 hover:text-atalaia-neon transition-colors"
+            >
+                {isRegister ? 'Já tem conta? Faça login' : 'Não tem conta? Crie agora'}
+            </button>
+          )}
         </div>
       </Card>
     </div>

@@ -4,8 +4,9 @@ import Layout from '../components/Layout';
 import { useAuth } from '../context/AuthContext';
 import { UserRole, Neighborhood, CameraProtocol, Plan } from '../types';
 import { MockService } from '../services/mockService';
+import { PaymentService } from '../services/paymentService';
 import { Card, Button, Input, Modal, Badge } from '../components/UI';
-import { Video, Plus, Code, Eye, Lock, Check, MousePointerClick, Send, MapPin, Search, Trash2, AlertCircle, Settings, List, ShieldCheck } from 'lucide-react';
+import { Video, Plus, Code, Eye, Lock, Check, MousePointerClick, Send, MapPin, Search, Trash2, AlertTriangle, Settings, List, ShieldCheck, Info, ChevronDown } from 'lucide-react';
 
 const Cameras: React.FC = () => {
   const { user } = useAuth();
@@ -147,11 +148,12 @@ const Cameras: React.FC = () => {
       if (!user) return;
       setProcessingUpgrade(planId);
       try {
-          await MockService.updateUserPlan(user.id, planId);
-          alert('Plano atualizado com sucesso! O sistema será recarregado para aplicar as mudanças.');
-          window.location.reload(); // Reload to refresh AuthContext and unlock features
+          // Gerar checkout Mercado Pago
+          const checkoutUrl = await PaymentService.createPreference(planId, user.email, user.name);
+          // Redirecionar
+          window.location.href = checkoutUrl;
       } catch (error: any) {
-          alert('Erro ao assinar plano: ' + error.message);
+          alert('Erro ao gerar pagamento: ' + error.message);
           setProcessingUpgrade(null);
       }
   };
@@ -165,9 +167,9 @@ const Cameras: React.FC = () => {
       ? filteredNeighborhoods 
       : filteredNeighborhoods.slice(0, 4);
 
-  // Admin always has access, otherwise check plan
-  // Correction: If user is ADMIN, ignore plan check
-  const isLocked = user?.role !== UserRole.ADMIN && user?.plan === 'FREE';
+  // Admin and Integrator always have access, otherwise check plan
+  // Se for Admin ou Integrador, libera geral. Se for morador, checa se pagou.
+  const isLocked = user?.role !== UserRole.ADMIN && user?.role !== UserRole.INTEGRATOR && user?.plan === 'FREE';
 
   const UniversalPlayer = ({ url }: { url: string }) => {
     // Basic detection for direct video files vs embeds
@@ -260,42 +262,55 @@ const Cameras: React.FC = () => {
                 </div>
               ) : (
                 <>
+                  {/* Search Bar - ADMIN ONLY */}
                   {user?.role === UserRole.ADMIN && (
-                      <div className="mb-6 space-y-4">
-                          <div className="relative">
-                              <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500" size={18} />
-                              <input 
-                                  type="text" 
-                                  placeholder="Buscar bairro..."
-                                  value={searchTerm}
-                                  onChange={(e) => setSearchTerm(e.target.value)}
-                                  className="w-full bg-black/50 border border-atalaia-border rounded-lg pl-10 pr-4 py-3 text-white focus:outline-none focus:border-atalaia-neon"
-                              />
-                          </div>
-
-                          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
-                              {displayedNeighborhoods.map(hood => (
-                                  <div 
-                                    key={hood.id}
-                                    onClick={() => setSelectedNeighborhood(hood)}
-                                    className={`
-                                        relative flex flex-col p-4 rounded-xl border cursor-pointer transition-all
-                                        ${selectedNeighborhood?.id === hood.id 
-                                            ? 'bg-atalaia-neon/10 border-atalaia-neon' 
-                                            : 'bg-[#111] border-white/5 hover:bg-[#151515]'
-                                        }
-                                    `}
-                                  >
-                                      <div className="flex items-center gap-3 mb-2">
-                                          <Video size={20} className={selectedNeighborhood?.id === hood.id ? 'text-atalaia-neon' : 'text-gray-400'} />
-                                          <h3 className="font-bold truncate text-white">{hood.name}</h3>
-                                      </div>
-                                      <p className="text-xs text-gray-500">Clique para visualizar</p>
-                                  </div>
-                              ))}
-                          </div>
+                      <div className="relative mb-4">
+                          <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500" size={18} />
+                          <input 
+                              type="text" 
+                              placeholder="Buscar bairro..."
+                              value={searchTerm}
+                              onChange={(e) => setSearchTerm(e.target.value)}
+                              className="w-full bg-black/50 border border-atalaia-border rounded-lg pl-10 pr-4 py-3 text-white focus:outline-none focus:border-atalaia-neon"
+                          />
                       </div>
                   )}
+
+                  {/* Instructional Banner - VISIBLE TO ALL */}
+                  <div className="bg-[#111] border border-atalaia-border p-4 rounded-xl flex items-start gap-3 mb-6">
+                        <div className="bg-atalaia-neon/10 p-2 rounded-lg text-atalaia-neon shrink-0">
+                            <MousePointerClick size={20} />
+                        </div>
+                        <div>
+                            <h4 className="text-white font-bold text-sm">Instrução de Uso</h4>
+                            <p className="text-gray-400 text-xs mt-1 leading-relaxed">
+                                Role o quadro abaixo e escolha a câmera desejada. Clicando no botão, abra a câmera.
+                            </p>
+                        </div>
+                  </div>
+
+                  {/* Grid - VISIBLE TO ALL */}
+                  <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4 mb-8">
+                      {displayedNeighborhoods.map(hood => (
+                          <div 
+                            key={hood.id}
+                            onClick={() => setSelectedNeighborhood(hood)}
+                            className={`
+                                relative flex flex-col p-4 rounded-xl border cursor-pointer transition-all
+                                ${selectedNeighborhood?.id === hood.id 
+                                    ? 'bg-atalaia-neon/10 border-atalaia-neon' 
+                                    : 'bg-[#111] border-white/5 hover:bg-[#151515]'
+                                }
+                            `}
+                          >
+                              <div className="flex items-center gap-3 mb-2">
+                                  <Video size={20} className={selectedNeighborhood?.id === hood.id ? 'text-atalaia-neon' : 'text-gray-400'} />
+                                  <h3 className="font-bold truncate text-white">{hood.name}</h3>
+                              </div>
+                              <p className="text-xs text-gray-500">Clique para visualizar</p>
+                          </div>
+                      ))}
+                  </div>
 
                   {selectedNeighborhood ? (
                       <div className="animate-in fade-in zoom-in duration-300 mt-4">
@@ -437,6 +452,13 @@ const Cameras: React.FC = () => {
               </form>
               {generatedProtocol && (
                   <div className="mt-8 p-6 bg-black/40 rounded-xl border border-atalaia-border animate-in slide-in-from-bottom-2">
+                       <div className="mb-4 p-3 bg-yellow-500/10 border border-yellow-500/20 rounded-lg flex items-start gap-3 text-yellow-500">
+                           <AlertTriangle size={18} className="shrink-0 mt-0.5" />
+                           <p className="text-sm font-medium">
+                               Atenção: Copie e cole o protocolo <strong>RTMP</strong> nas configurações de transmissão da sua câmera para conectar.
+                           </p>
+                       </div>
+
                        <h3 className="font-bold text-atalaia-neon mb-4">Gerado:</h3>
                        <div className="space-y-2 mb-4 font-mono text-xs text-gray-300">
                            <div className="bg-black p-2 border border-gray-800 rounded">{generatedProtocol.rtmp}</div>
@@ -456,7 +478,7 @@ const Cameras: React.FC = () => {
             <h2 className="text-2xl font-bold text-white mb-2 text-center">Desbloquear Monitoramento</h2>
             <p className="text-gray-400 mb-6 text-center text-sm">Escolha um plano para acessar as câmeras em tempo real.</p>
             
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-8">
                 {plans.map(plan => (
                     <div 
                         key={plan.id} 
@@ -494,7 +516,7 @@ const Cameras: React.FC = () => {
                             variant={plan.id === 'FAMILY' ? 'primary' : 'outline'}
                             className="w-full text-sm"
                         >
-                            {processingUpgrade === plan.id ? 'Processando...' : `Assinar ${plan.name}`}
+                            {processingUpgrade === plan.id ? 'Gerando Pagamento...' : `Assinar ${plan.name}`}
                         </Button>
                     </div>
                 ))}
@@ -502,6 +524,21 @@ const Cameras: React.FC = () => {
             {plans.length === 0 && (
                 <p className="text-center text-gray-500 py-8">Carregando planos...</p>
             )}
+
+            {/* Mercado Pago Badge Inside Modal - IMPROVED */}
+            <div className="flex flex-col items-center justify-center pt-6 border-t border-white/10 mt-2">
+               <div className="bg-white px-6 py-3 rounded-lg shadow-inner mb-3">
+                   <img 
+                        src="https://logodownload.org/wp-content/uploads/2019/06/mercado-pago-logo.png" 
+                        alt="Mercado Pago" 
+                        className="h-6 object-contain"
+                   />
+               </div>
+               <div className="flex gap-4 text-[10px] text-gray-400 font-medium uppercase tracking-wider">
+                   <span>🔒 Compra 100% Segura</span>
+                   <span>⚡ Liberação Imediata</span>
+               </div>
+            </div>
         </div>
       </Modal>
 

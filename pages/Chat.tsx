@@ -3,7 +3,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import Layout from '../components/Layout';
 import { useAuth } from '../context/AuthContext';
 import { Card, Input, Button } from '../components/UI';
-import { MessageCircle, Send, AlertTriangle, ShieldAlert, CheckCircle, Eye, ImageIcon } from 'lucide-react';
+import { MessageCircle, Send, AlertTriangle, ShieldAlert, CheckCircle, Eye, ImageIcon, MapPin, Loader2, Wifi, WifiOff } from 'lucide-react';
 import { MockService } from '../services/mockService';
 import { ChatMessage, UserRole } from '../types';
 import { supabase } from '../lib/supabaseClient';
@@ -12,74 +12,95 @@ const Chat: React.FC = () => {
   const { user } = useAuth();
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [newMessage, setNewMessage] = useState('');
+  const [neighborhoodName, setNeighborhoodName] = useState('');
+  const [connectionStatus, setConnectionStatus] = useState<'CONNECTING' | 'CONNECTED' | 'DISCONNECTED'>('CONNECTING');
   const chatEndRef = useRef<HTMLDivElement>(null);
 
-  const fetchMessages = async () => {
-      // Allow fetching even if neighborhoodId is undefined (for testing or global messages)
-      const data = await MockService.getMessages(user?.neighborhoodId || '');
-      setMessages(data);
-  };
-
+  // 1. Carrega Nome do Bairro (Apenas visual)
   useEffect(() => {
-      fetchMessages();
+    const loadHoodName = async () => {
+        if (user?.neighborhoodId) {
+            const hood = await MockService.getNeighborhoodById(user.neighborhoodId);
+            setNeighborhoodName(hood?.name || '');
+        } else if (user?.role === UserRole.ADMIN) {
+            setNeighborhoodName('Visão Global (Admin)');
+        }
+    };
+    loadHoodName();
+  }, [user?.neighborhoodId, user?.role]);
 
-      // SETUP REALTIME SUBSCRIPTION
+  // 2. Busca Mensagens Iniciais
+  useEffect(() => {
+      const fetchInitialMessages = async () => {
+          if (!user) return;
+          const data = await MockService.getMessages(user.neighborhoodId || '');
+          setMessages(data);
+      };
+      fetchInitialMessages();
+  }, [user?.neighborhoodId]); // Só recarrega lista se mudar de bairro
+
+  // 3. Configuração REALTIME OTIMIZADA
+  useEffect(() => {
+      if (!user) return;
+
+      setConnectionStatus('CONNECTING');
+
+      // Define filtro estrito: só escuta mensagens deste bairro
+      const filterConfig = user.neighborhoodId 
+        ? `neighborhood_id=eq.${user.neighborhoodId}` 
+        : undefined;
+
+      // Canal único baseado no ID do bairro para evitar conflitos
+      const channelId = `chat_room_${user.neighborhoodId || 'global'}`;
+
       const channel = supabase
-        .channel(`chat_global`) // Listen to global changes, we filter in callback
+        .channel(channelId)
         .on(
           'postgres_changes',
           {
             event: 'INSERT',
             schema: 'public',
             table: 'chat_messages',
+            filter: filterConfig 
           },
           (payload) => {
             const newMsg = payload.new as any;
             
-            // Logic to check if message belongs to my neighborhood
-            // If user has no neighborhood, they might see everything or nothing depending on logic.
-            // Here we assume strict filtering:
-            
-            const myHood = user?.neighborhoodId;
-            const msgHood = newMsg.neighborhood_id;
+            // Tratamento de mensagem recebida
+            const formattedMsg: ChatMessage = {
+                id: newMsg.id,
+                neighborhoodId: newMsg.neighborhood_id,
+                userId: newMsg.user_id,
+                userName: newMsg.user_name,
+                userRole: newMsg.user_role as UserRole,
+                text: newMsg.text,
+                timestamp: new Date(newMsg.timestamp),
+                isSystemAlert: newMsg.is_system_alert,
+                alertType: newMsg.alert_type,
+                image: newMsg.image
+            };
 
-            // Condition: 
-            // 1. Exact Match
-            // 2. Or message is global (null) and user allows it
-            // 3. Or user is undefined (maybe allow seeing all for debugging? No, keep safe)
-            
-            const isMatch = (myHood == msgHood) || (!msgHood && !myHood);
-
-            if (isMatch) {
-                const formattedMsg: ChatMessage = {
-                    id: newMsg.id,
-                    neighborhoodId: newMsg.neighborhood_id,
-                    userId: newMsg.user_id,
-                    userName: newMsg.user_name,
-                    userRole: newMsg.user_role as UserRole,
-                    text: newMsg.text,
-                    timestamp: new Date(newMsg.timestamp),
-                    isSystemAlert: newMsg.is_system_alert,
-                    alertType: newMsg.alert_type,
-                    image: newMsg.image
-                };
-
-                setMessages((prev) => {
-                    // Prevent duplicates
-                    if (prev.some(m => m.id === formattedMsg.id)) return prev;
-                    return [...prev, formattedMsg];
-                });
-            }
+            setMessages((prev) => {
+                if (prev.some(m => m.id === formattedMsg.id)) return prev;
+                return [...prev, formattedMsg];
+            });
           }
         )
-        .subscribe();
+        .subscribe((status) => {
+            if (status === 'SUBSCRIBED') {
+                setConnectionStatus('CONNECTED');
+            } else if (status === 'CLOSED' || status === 'CHANNEL_ERROR') {
+                setConnectionStatus('DISCONNECTED');
+            }
+        });
 
       return () => {
           supabase.removeChannel(channel);
+          setConnectionStatus('DISCONNECTED');
       };
-  }, [user]);
+  }, [user?.neighborhoodId]); // CRÍTICO: Dependência reduzida para evitar reconexão
 
-  // Scroll to bottom when messages change
+  // Scroll automático inteligente
   const lastMessageId = messages.length > 0 ? messages[messages.length - 1].id : null;
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -92,7 +113,7 @@ const Chat: React.FC = () => {
       const tempId = crypto.randomUUID();
       const msgText = newMessage;
       
-      // Optimistic UI Update
+      // Optimistic UI Update (Mostra na hora antes de confirmar)
       const optimisticMsg: ChatMessage = {
           id: tempId,
           neighborhoodId: user.neighborhoodId || 'unknown',
@@ -108,16 +129,14 @@ const Chat: React.FC = () => {
 
       try {
         await MockService.sendMessage({
-            neighborhoodId: user.neighborhoodId || undefined, // Send undefined to sanitize to null in service
+            neighborhoodId: user.neighborhoodId || undefined, 
             userId: user.id,
             userName: user.name,
             userRole: user.role,
             text: msgText,
         });
-        // Realtime will confirm the message, logic in .on('postgres_changes') handles dedupe
       } catch (err) {
           console.error("Error sending message", err);
-          // Revert optimistic update if needed, but for now simple is better
       }
   };
 
@@ -128,9 +147,17 @@ const Chat: React.FC = () => {
           [UserRole.SCR]: "bg-yellow-500/20 text-yellow-400 border-yellow-500/30",
           [UserRole.RESIDENT]: "bg-gray-700/50 text-gray-300 border-gray-600",
       };
+
+      const roleNames: Record<string, string> = {
+          ADMIN: 'ADMINISTRADOR',
+          INTEGRATOR: 'INTEGRADOR',
+          SCR: 'MOTOVIGIA',
+          RESIDENT: 'MORADOR'
+      };
+
       return (
           <span className={`text-[10px] px-1.5 py-0.5 rounded border ${colors[role]} uppercase tracking-wider font-bold`}>
-              {role === UserRole.SCR ? 'MOTOVIGIA' : role}
+              {roleNames[role]}
           </span>
       );
   };
@@ -154,13 +181,33 @@ const Chat: React.FC = () => {
             </div>
 
             <Card className="flex-1 flex flex-col border-atalaia-border/50 overflow-hidden bg-[#0a0a0a]">
-                <div className="p-4 border-b border-white/5 bg-[#111] flex items-center gap-2">
-                    <MessageCircle className="text-atalaia-neon" size={20} />
-                    <div>
-                        <h3 className="font-bold text-white">Canal do Bairro</h3>
-                        <p className="text-xs text-green-500 flex items-center gap-1">
-                            <span className="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse" /> Online
-                        </p>
+                <div className="p-4 border-b border-white/5 bg-[#111] flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                        <MessageCircle className="text-atalaia-neon" size={20} />
+                        <div>
+                            <h3 className="font-bold text-white">
+                                {neighborhoodName ? `Canal: ${neighborhoodName}` : 'Carregando...'}
+                            </h3>
+                            {connectionStatus === 'CONNECTED' && (
+                                <p className="text-xs text-green-500 flex items-center gap-1">
+                                    <Wifi size={12} /> Conectado ao Bairro
+                                </p>
+                            )}
+                            {connectionStatus === 'CONNECTING' && (
+                                <p className="text-xs text-yellow-500 flex items-center gap-1">
+                                    <Loader2 size={12} className="animate-spin" /> Conectando...
+                                </p>
+                            )}
+                            {connectionStatus === 'DISCONNECTED' && (
+                                <p className="text-xs text-red-500 flex items-center gap-1">
+                                    <WifiOff size={12} /> Desconectado
+                                </p>
+                            )}
+                        </div>
+                    </div>
+                    <div className="hidden md:flex items-center gap-2 text-xs text-gray-500">
+                        <MapPin size={12} />
+                        Vínculo Seguro
                     </div>
                 </div>
 
@@ -240,8 +287,9 @@ const Chat: React.FC = () => {
                         onChange={(e) => setNewMessage(e.target.value)}
                         placeholder="Digite sua mensagem..."
                         className="flex-1 !bg-black !border-white/10 focus:!border-atalaia-neon !h-12"
+                        disabled={connectionStatus !== 'CONNECTED'} // Evita envio sem conexão
                     />
-                    <Button type="submit" className="px-6 bg-white/5 hover:bg-atalaia-neon hover:text-black text-atalaia-neon transition-colors h-12">
+                    <Button type="submit" disabled={connectionStatus !== 'CONNECTED'} className="px-6 bg-white/5 hover:bg-atalaia-neon hover:text-black text-atalaia-neon transition-colors h-12 disabled:opacity-50">
                         <Send size={20} />
                     </Button>
                 </form>
