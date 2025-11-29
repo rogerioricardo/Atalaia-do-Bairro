@@ -96,7 +96,7 @@ const Landing: React.FC = () => {
           <div className="flex flex-col sm:flex-row gap-4 w-full sm:w-auto">
             {/* Redireciona para Planos em vez de cadastrar direto */}
             <Button onClick={() => scrollToSection('planos')} className="h-12 sm:h-14 px-8 text-sm sm:text-base font-bold uppercase tracking-wide w-full sm:w-auto">
-              Criar Grupo do meu Bairro
+              Entrar no Grupo do meu Bairro
             </Button>
             <button 
                 onClick={handleLogin}
