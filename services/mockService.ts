@@ -2,6 +2,9 @@
 import { supabase } from '../lib/supabaseClient';
 import { Neighborhood, Alert, CameraProtocol, ChatMessage, UserRole, User, Notification, Plan } from '../types';
 
+// Cache simples em memória para evitar requests repetidos de bairros
+let cachedNeighborhoods: Neighborhood[] | null = null;
+
 // Helper to map DB snake_case to Frontend camelCase
 const mapProfileToUser = (profile: any): User => ({
   id: profile.id,
@@ -19,20 +22,54 @@ const mapProfileToUser = (profile: any): User => ({
   lng: profile.lng
 });
 
+// Helper to sanitize UUIDs for database calls
+const sanitizeUUID = (id?: string): string | null => {
+    if (!id || id === 'unknown' || id === 'undefined' || id.trim() === '') {
+        return null;
+    }
+    // Simple regex check for UUID format (loose check)
+    if (id.length < 20) return null; 
+    return id;
+};
+
 export const MockService = {
   // --- NEIGHBORHOODS ---
-  getNeighborhoods: async (): Promise<Neighborhood[]> => {
-    const { data } = await supabase.from('neighborhoods').select('*');
-    return (data || []).map(n => ({
-      id: n.id,
-      name: n.name,
-      iframeUrl: n.iframe_url,
-      lat: n.lat,
-      lng: n.lng
-    }));
+  getNeighborhoods: async (forceRefresh = false): Promise<Neighborhood[]> => {
+    // Se já temos em cache e não forçado, retorna cache instantaneamente
+    if (cachedNeighborhoods && !forceRefresh) {
+        return cachedNeighborhoods;
+    }
+
+    try {
+        const { data, error } = await supabase.from('neighborhoods').select('*').order('name');
+        
+        if (error) {
+          console.error("Erro ao buscar bairros (Supabase):", error);
+          return cachedNeighborhoods || [];
+        }
+        
+        const hoods = (data || []).map(n => ({
+          id: n.id,
+          name: n.name,
+          iframeUrl: n.iframe_url,
+          lat: n.lat,
+          lng: n.lng
+        }));
+
+        cachedNeighborhoods = hoods;
+        return hoods;
+    } catch (e) {
+        console.error("Erro de conexão ao buscar bairros:", e);
+        return [];
+    }
   },
 
   getNeighborhoodById: async (id: string): Promise<Neighborhood | undefined> => {
+    if (cachedNeighborhoods) {
+        const found = cachedNeighborhoods.find(n => n.id === id);
+        if (found) return found;
+    }
+
     const { data } = await supabase.from('neighborhoods').select('*').eq('id', id).single();
     if (!data) return undefined;
     return {
@@ -53,6 +90,8 @@ export const MockService = {
     }]).select().single();
     
     if (error) throw error;
+    cachedNeighborhoods = null;
+
     return {
       id: data.id,
       name: data.name,
@@ -60,6 +99,15 @@ export const MockService = {
       lat: data.lat,
       lng: data.lng
     };
+  },
+
+  deleteNeighborhood: async (id: string): Promise<void> => {
+      const { error } = await supabase.from('neighborhoods').delete().eq('id', id);
+      if (error) {
+          console.error("Erro ao excluir bairro:", error);
+          throw new Error(error.message); // Propagate actual Supabase error message
+      }
+      cachedNeighborhoods = null;
   },
 
   // --- ALERTS ---
@@ -76,38 +124,51 @@ export const MockService = {
       userName: a.user_name,
       neighborhoodId: a.neighborhood_id,
       timestamp: new Date(a.timestamp),
-      message: a.message
+      message: a.message,
+      image: a.image
     }));
   },
 
   createAlert: async (alert: Omit<Alert, 'id' | 'timestamp'> & { userRole?: UserRole }): Promise<Alert> => {
+    const safeNeighborhoodId = sanitizeUUID(alert.neighborhoodId);
+
     const { data, error } = await supabase.from('alerts').insert([{
       type: alert.type,
       user_id: alert.userId,
       user_name: alert.userName,
-      neighborhood_id: alert.neighborhoodId,
-      message: alert.message
+      neighborhood_id: safeNeighborhoodId,
+      message: alert.message,
+      image: alert.image
     }]).select().single();
 
-    if (error) throw error;
+    if (error) {
+        console.error("Erro ao criar alerta:", error);
+        throw error; // Propagate error but handle nicely in UI
+    }
 
-    // Auto-post to chat
-    const alertMessages: Record<string, string> = {
-        'PANIC': '🚨 PÂNICO ACIONADO! Preciso de ajuda urgente!',
-        'DANGER': '⚠️ PERIGO REPORTADO. Fiquem atentos.',
-        'SUSPICIOUS': '👀 Atividade suspeita reportada.',
-        'OK': '✅ Tudo tranquilo por aqui.'
-    };
-
-    await supabase.from('chat_messages').insert([{
-      neighborhood_id: alert.neighborhoodId,
-      user_id: alert.userId,
-      user_name: alert.userName,
-      user_role: alert.userRole,
-      text: alertMessages[alert.type] || 'Alerta',
-      is_system_alert: true,
-      alert_type: alert.type
-    }]);
+    // Auto-post to chat (Fire and Forget - Silent Catch)
+    try {
+        const alertMessages: Record<string, string> = {
+            'PANIC': '🚨 PÂNICO ACIONADO! Preciso de ajuda urgente!',
+            'DANGER': '⚠️ PERIGO REPORTADO. Fiquem atentos.',
+            'SUSPICIOUS': '👀 Atividade suspeita reportada.',
+            'OK': '✅ Tudo tranquilo por aqui.'
+        };
+        
+        await supabase.from('chat_messages').insert([{
+            neighborhood_id: safeNeighborhoodId,
+            user_id: alert.userId,
+            user_name: alert.userName,
+            user_role: alert.userRole,
+            text: alertMessages[alert.type] || 'Alerta',
+            is_system_alert: true,
+            alert_type: alert.type,
+            image: alert.image
+        }]);
+    } catch (chatError) {
+        // Silent catch for chat logging issues to prevent blocking the alert flow
+        console.warn("Falha não-crítica ao postar alerta no chat:", chatError);
+    }
 
     return {
       id: data.id,
@@ -116,14 +177,13 @@ export const MockService = {
       userName: data.user_name,
       neighborhoodId: data.neighborhood_id,
       timestamp: new Date(data.timestamp),
-      message: data.message
+      message: data.message,
+      image: data.image
     };
   },
 
   // --- PROTOCOLS ---
   generateProtocol: async (cameraName: string, lat?: number, lng?: number): Promise<CameraProtocol> => {
-    // Protocol generation doesn't necessarily need DB storage unless we want logs,
-    // but here we just return the object as the user requested.
     const cleanName = cameraName.toLowerCase().replace(/[^a-z0-9]/g, '');
     return {
       id: crypto.randomUUID(),
@@ -165,12 +225,17 @@ export const MockService = {
 
   // --- CHAT ---
   getMessages: async (neighborhoodId: string): Promise<ChatMessage[]> => {
-    const { data } = await supabase
-      .from('chat_messages')
-      .select('*')
-      .eq('neighborhood_id', neighborhoodId)
-      .order('timestamp', { ascending: true })
-      .limit(100);
+    const safeNeighborhoodId = sanitizeUUID(neighborhoodId);
+    let query = supabase.from('chat_messages').select('*').order('timestamp', { ascending: true }).limit(100);
+    
+    if (safeNeighborhoodId) {
+        query = query.eq('neighborhood_id', safeNeighborhoodId);
+    } else {
+        // Fallback for global or null neighborhood messages if desired
+        query = query.is('neighborhood_id', null);
+    }
+
+    const { data } = await query;
 
     return (data || []).map(m => ({
       id: m.id,
@@ -181,13 +246,16 @@ export const MockService = {
       text: m.text,
       timestamp: new Date(m.timestamp),
       isSystemAlert: m.is_system_alert,
-      alertType: m.alert_type
+      alertType: m.alert_type,
+      image: m.image
     }));
   },
 
   sendMessage: async (msg: Omit<ChatMessage, 'id' | 'timestamp'>): Promise<ChatMessage> => {
+    const safeNeighborhoodId = sanitizeUUID(msg.neighborhoodId);
+
     const { data, error } = await supabase.from('chat_messages').insert([{
-      neighborhood_id: msg.neighborhoodId,
+      neighborhood_id: safeNeighborhoodId,
       user_id: msg.userId,
       user_name: msg.userName,
       user_role: msg.userRole,
@@ -205,24 +273,26 @@ export const MockService = {
       text: data.text,
       timestamp: new Date(data.timestamp),
       isSystemAlert: data.is_system_alert,
-      alertType: data.alert_type
+      alertType: data.alert_type,
+      image: data.image
     };
   },
 
   // --- USERS & PROFILES ---
   getUsers: async (neighborhoodId?: string): Promise<User[]> => {
     let query = supabase.from('profiles').select('*');
-    if (neighborhoodId) {
-        query = query.eq('neighborhood_id', neighborhoodId);
+    const safeNeighborhoodId = sanitizeUUID(neighborhoodId);
+    
+    if (safeNeighborhoodId) {
+        query = query.eq('neighborhood_id', safeNeighborhoodId);
     }
     const { data } = await query;
     return (data || []).map(mapProfileToUser);
   },
 
   createResident: async (userData: Partial<User>, neighborhoodId: string): Promise<User> => {
-      // 1. Generate a manual ID for the profile since they don't have an Auth User yet.
-      // This works because we removed the Foreign Key constraint in the SQL script.
       const tempId = crypto.randomUUID();
+      const safeNeighborhoodId = sanitizeUUID(neighborhoodId);
 
       const { data, error } = await supabase.from('profiles').insert([{
           id: tempId,
@@ -230,15 +300,12 @@ export const MockService = {
           email: userData.email,
           phone: userData.phone,
           address: userData.address,
-          neighborhood_id: neighborhoodId,
+          neighborhood_id: safeNeighborhoodId,
           role: 'RESIDENT',
-          plan: 'FREE' // Enforce FREE plan
+          plan: 'FREE' 
       }]).select().single();
 
-      if (error) {
-          console.error("Supabase Error:", error);
-          throw new Error(error.message);
-      }
+      if (error) throw new Error(error.message);
       return mapProfileToUser(data);
   },
 

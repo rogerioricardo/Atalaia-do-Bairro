@@ -1,24 +1,28 @@
 
-
 import React, { useEffect, useState } from 'react';
 import Layout from '../components/Layout';
 import { useAuth } from '../context/AuthContext';
-import { UserRole, Neighborhood, CameraProtocol } from '../types';
+import { UserRole, Neighborhood, CameraProtocol, Plan } from '../types';
 import { MockService } from '../services/mockService';
-import { Card, Button, Input, Modal } from '../components/UI';
-import { Video, Plus, Code, Eye, Lock, Check, MousePointerClick, Send, MapPin } from 'lucide-react';
+import { Card, Button, Input, Modal, Badge } from '../components/UI';
+import { Video, Plus, Code, Eye, Lock, Check, MousePointerClick, Send, MapPin, Search, Trash2, AlertCircle, Settings, List, ShieldCheck } from 'lucide-react';
 
 const Cameras: React.FC = () => {
   const { user } = useAuth();
-  const [activeTab, setActiveTab] = useState<'view' | 'insert' | 'protocol'>('view');
+  const [activeTab, setActiveTab] = useState<'view' | 'manage' | 'protocol'>('view');
   
   // Data State
   const [neighborhoods, setNeighborhoods] = useState<Neighborhood[]>([]);
   const [selectedNeighborhood, setSelectedNeighborhood] = useState<Neighborhood | null>(null);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [plans, setPlans] = useState<Plan[]>([]);
   
+  // Search State
+  const [searchTerm, setSearchTerm] = useState('');
+
   // Form State
   const [newHoodName, setNewHoodName] = useState('');
-  const [newHoodIframe, setNewHoodIframe] = useState('');
+  const [newHoodIframe, setNewHoodIframe] = useState(''); // Stores raw HTML or URL
   const [newHoodLat, setNewHoodLat] = useState('');
   const [newHoodLng, setNewHoodLng] = useState('');
 
@@ -30,11 +34,16 @@ const Cameras: React.FC = () => {
 
   // Upgrade Modal State
   const [showUpgradeModal, setShowUpgradeModal] = useState(false);
+  const [processingUpgrade, setProcessingUpgrade] = useState<string | null>(null);
 
   useEffect(() => {
     const loadData = async () => {
+      // Load Plans for modal
+      const availablePlans = await MockService.getPlans();
+      setPlans(availablePlans.filter(p => p.id !== 'FREE'));
+
       if (user?.role === UserRole.ADMIN) {
-        const hoods = await MockService.getNeighborhoods();
+        const hoods = await MockService.getNeighborhoods(true); // Force refresh for admin
         setNeighborhoods(hoods);
       } else if (user?.neighborhoodId) {
         const hood = await MockService.getNeighborhoodById(user.neighborhoodId);
@@ -45,26 +54,71 @@ const Cameras: React.FC = () => {
       }
     };
     loadData();
-  }, [user]);
+  }, [user, activeTab]); // Reload when tab changes
+
+  // Helper to extract SRC from iframe code
+  const extractSrcFromIframe = (input: string): string => {
+      // If it contains <iframe, try to find src="..."
+      if (input.includes('<iframe')) {
+          const srcMatch = input.match(/src=["'](.*?)["']/);
+          if (srcMatch && srcMatch[1]) {
+              return srcMatch[1];
+          }
+      }
+      // If no iframe tag or no match, assume it's just a URL
+      return input.trim();
+  };
 
   const handleCreateNeighborhood = async (e: React.FormEvent) => {
     e.preventDefault();
     const lat = newHoodLat ? parseFloat(newHoodLat) : undefined;
     const lng = newHoodLng ? parseFloat(newHoodLng) : undefined;
+    
+    // Extract clean URL from the pasted code
+    const cleanUrl = extractSrcFromIframe(newHoodIframe);
 
-    await MockService.createNeighborhood(newHoodName, newHoodIframe, lat, lng);
-    
-    const hoods = await MockService.getNeighborhoods();
-    setNeighborhoods(hoods);
-    
-    // Reset form
-    setNewHoodName('');
-    setNewHoodIframe('');
-    setNewHoodLat('');
-    setNewHoodLng('');
-    
-    alert('Bairro e coordenadas criados com sucesso!');
-    setActiveTab('view');
+    try {
+        await MockService.createNeighborhood(newHoodName, cleanUrl, lat, lng);
+        const hoods = await MockService.getNeighborhoods(true);
+        setNeighborhoods(hoods);
+        
+        // Reset form
+        setNewHoodName('');
+        setNewHoodIframe('');
+        setNewHoodLat('');
+        setNewHoodLng('');
+        
+        alert('Bairro cadastrado com sucesso!');
+    } catch (error: any) {
+        alert('Erro ao criar bairro: ' + error.message);
+    }
+  };
+
+  const handleDeleteNeighborhood = async (id: string, name: string) => {
+      // Confirmação dupla para segurança
+      const confirm1 = window.confirm(`ATENÇÃO: Deseja realmente excluir o bairro "${name}"?`);
+      if (!confirm1) return;
+
+      const confirm2 = window.confirm(`Isso apagará o histórico de alertas e chats deste bairro. Os moradores ficarão sem vínculo. Confirmar exclusão?`);
+      if (!confirm2) return;
+      
+      setDeletingId(id);
+      try {
+          await MockService.deleteNeighborhood(id);
+          
+          // Update local state immediately
+          setNeighborhoods(prev => prev.filter(h => h.id !== id));
+          
+          if (selectedNeighborhood?.id === id) {
+              setSelectedNeighborhood(null);
+          }
+          alert('Bairro excluído com sucesso.');
+      } catch (error: any) {
+          console.error("Erro na exclusão:", error);
+          alert('Erro ao excluir: ' + (error.message || 'Verifique se rodou o Script SQL de Permissões no Supabase.'));
+      } finally {
+          setDeletingId(null);
+      }
   };
 
   const handleGenerateProtocol = async (e: React.FormEvent) => {
@@ -81,7 +135,7 @@ const Cameras: React.FC = () => {
   const handleSendToAdmin = async () => {
       if (generatedProtocol && user) {
           await MockService.sendProtocolToAdmin(generatedProtocol, user.name);
-          alert('Protocolo e coordenadas enviados com sucesso para o Administrador Master!');
+          alert('Protocolo enviado com sucesso!');
           setGeneratedProtocol(null);
           setProtocolCameraName('');
           setProtocolLat('');
@@ -89,26 +143,64 @@ const Cameras: React.FC = () => {
       }
   };
 
-  const isFreePlan = user?.plan === 'FREE';
+  const handleUpgradePlan = async (planId: string) => {
+      if (!user) return;
+      setProcessingUpgrade(planId);
+      try {
+          await MockService.updateUserPlan(user.id, planId);
+          alert('Plano atualizado com sucesso! O sistema será recarregado para aplicar as mudanças.');
+          window.location.reload(); // Reload to refresh AuthContext and unlock features
+      } catch (error: any) {
+          alert('Erro ao assinar plano: ' + error.message);
+          setProcessingUpgrade(null);
+      }
+  };
 
-  // Iframe Component to ensure correct aspect ratio and security
-  const CameraIframe = ({ url }: { url: string }) => (
-    <div className="w-full bg-black rounded-xl overflow-hidden border border-atalaia-border relative shadow-[0_0_30px_rgba(0,0,0,0.5)]">
-        {/* Aspect Ratio Wrapper 16:9 */}
-        <div style={{ position: 'relative', width: '100%', paddingBottom: '56.25%' }}>
-            <iframe 
-                src={url}
-                style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: '100%' }}
-                frameBorder="0"
-                allowFullScreen
-                title="Camera Feed"
-            ></iframe>
-        </div>
-        <div className="absolute top-4 right-4 bg-red-600 text-white text-xs font-bold px-2 py-1 rounded animate-pulse">
-            AO VIVO
-        </div>
-    </div>
+  // Filter Neighborhoods
+  const filteredNeighborhoods = neighborhoods.filter(h => 
+      h.name.toLowerCase().includes(searchTerm.toLowerCase())
   );
+
+  const displayedNeighborhoods = searchTerm 
+      ? filteredNeighborhoods 
+      : filteredNeighborhoods.slice(0, 4);
+
+  // Admin always has access, otherwise check plan
+  // Correction: If user is ADMIN, ignore plan check
+  const isLocked = user?.role !== UserRole.ADMIN && user?.plan === 'FREE';
+
+  const UniversalPlayer = ({ url }: { url: string }) => {
+    // Basic detection for direct video files vs embeds
+    const isDirectVideo = url.match(/\.(mp4|webm|ogg|m3u8)$/i);
+    
+    return (
+        <div className="w-full bg-black rounded-xl overflow-hidden border border-atalaia-border relative shadow-[0_0_30px_rgba(0,0,0,0.5)] aspect-video group">
+             {isDirectVideo ? (
+                 <video 
+                    src={url} 
+                    controls 
+                    autoPlay 
+                    muted 
+                    loop 
+                    className="w-full h-full object-cover"
+                 />
+             ) : (
+                <iframe 
+                    src={url}
+                    className="w-full h-full bg-black"
+                    frameBorder="0"
+                    allowFullScreen
+                    allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+                    title="Camera Feed"
+                />
+             )}
+            
+            <div className="absolute top-4 right-4 bg-red-600 text-white text-xs font-bold px-2 py-1 rounded animate-pulse shadow-lg z-10">
+                AO VIVO
+            </div>
+        </div>
+    );
+  };
 
   return (
     <Layout>
@@ -118,7 +210,6 @@ const Cameras: React.FC = () => {
            <p className="text-gray-400">Sistema de vigilância visual integrado.</p>
         </div>
         
-        {/* Action Buttons based on Role - Scrollable on mobile */}
         <div className="w-full md:w-auto overflow-x-auto pb-2 md:pb-0">
             <div className="flex bg-[#111] p-1 rounded-lg border border-atalaia-border w-max md:w-auto">
                 <button 
@@ -130,10 +221,10 @@ const Cameras: React.FC = () => {
                 
                 {user?.role === UserRole.ADMIN && (
                     <button 
-                        onClick={() => setActiveTab('insert')}
-                        className={`px-4 py-2 rounded-md text-sm font-medium transition-all whitespace-nowrap ${activeTab === 'insert' ? 'bg-atalaia-neon text-black' : 'text-gray-400 hover:text-white'}`}
+                        onClick={() => setActiveTab('manage')}
+                        className={`px-4 py-2 rounded-md text-sm font-medium transition-all whitespace-nowrap ${activeTab === 'manage' ? 'bg-atalaia-neon text-black' : 'text-gray-400 hover:text-white'}`}
                     >
-                        <div className="flex items-center gap-2"><Plus size={16} /> Inserir Bairro</div>
+                        <div className="flex items-center gap-2"><Settings size={16} /> Gestão de Bairros</div>
                     </button>
                 )}
                 
@@ -152,54 +243,73 @@ const Cameras: React.FC = () => {
       {/* VIEW MODE */}
       {activeTab === 'view' && (
           <div className="space-y-6">
-              {/* Plan Blocking Logic */}
-              {isFreePlan ? (
-                <div className="flex flex-col items-center justify-center p-8 md:p-16 border border-atalaia-border border-dashed rounded-2xl bg-[#0a0a0a] text-center relative overflow-hidden">
+              {isLocked ? (
+                <div className="flex flex-col items-center justify-center p-16 border border-atalaia-border border-dashed rounded-2xl bg-[#0a0a0a] text-center relative overflow-hidden">
                     <div className="absolute inset-0 bg-atalaia-neon/5 blur-[100px]" />
                     <div className="w-20 h-20 rounded-full bg-gray-900 flex items-center justify-center mb-6 border border-gray-800 relative z-10">
                         <Lock size={40} className="text-gray-500" />
                     </div>
                     <h2 className="text-2xl font-bold text-white mb-2 relative z-10">Recurso Bloqueado</h2>
-                    <p className="text-gray-400 max-w-md mb-8 relative z-10">
-                        O monitoramento de câmeras em tempo real é exclusivo para membros dos planos Família ou Prêmio.
+                    <p className="text-gray-400 mb-6 max-w-md relative z-10">
+                        O monitoramento de câmeras está disponível apenas para os planos Família e Prêmio.
                     </p>
-                    <Button onClick={() => setShowUpgradeModal(true)} className="relative z-10 px-8 py-3 text-lg">
+                    <Button onClick={() => setShowUpgradeModal(true)} className="relative z-10 px-8 py-3">
+                        <ShieldCheck size={18} className="mr-2" />
                         Fazer Upgrade Agora
                     </Button>
                 </div>
               ) : (
                 <>
                   {user?.role === UserRole.ADMIN && (
-                      <div className="mb-6">
-                          <p className="text-sm text-gray-400 mb-3 flex items-center gap-2 animate-in fade-in">
-                             <MousePointerClick size={16} className="text-atalaia-neon" /> 
-                             <span className="font-medium">Clique na câmera desejada para visualizar a câmera:</span>
-                          </p>
-                          <div className="flex flex-wrap gap-2">
-                              {neighborhoods.map(hood => (
-                                  <button
+                      <div className="mb-6 space-y-4">
+                          <div className="relative">
+                              <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500" size={18} />
+                              <input 
+                                  type="text" 
+                                  placeholder="Buscar bairro..."
+                                  value={searchTerm}
+                                  onChange={(e) => setSearchTerm(e.target.value)}
+                                  className="w-full bg-black/50 border border-atalaia-border rounded-lg pl-10 pr-4 py-3 text-white focus:outline-none focus:border-atalaia-neon"
+                              />
+                          </div>
+
+                          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
+                              {displayedNeighborhoods.map(hood => (
+                                  <div 
                                     key={hood.id}
                                     onClick={() => setSelectedNeighborhood(hood)}
-                                    className={`px-4 py-2 rounded-lg border text-sm transition-colors ${selectedNeighborhood?.id === hood.id ? 'bg-atalaia-neon/20 border-atalaia-neon text-white' : 'bg-black/40 border-atalaia-border text-gray-400'}`}
+                                    className={`
+                                        relative flex flex-col p-4 rounded-xl border cursor-pointer transition-all
+                                        ${selectedNeighborhood?.id === hood.id 
+                                            ? 'bg-atalaia-neon/10 border-atalaia-neon' 
+                                            : 'bg-[#111] border-white/5 hover:bg-[#151515]'
+                                        }
+                                    `}
                                   >
-                                      {hood.name}
-                                  </button>
+                                      <div className="flex items-center gap-3 mb-2">
+                                          <Video size={20} className={selectedNeighborhood?.id === hood.id ? 'text-atalaia-neon' : 'text-gray-400'} />
+                                          <h3 className="font-bold truncate text-white">{hood.name}</h3>
+                                      </div>
+                                      <p className="text-xs text-gray-500">Clique para visualizar</p>
+                                  </div>
                               ))}
                           </div>
                       </div>
                   )}
 
                   {selectedNeighborhood ? (
-                      <div className="animate-in fade-in zoom-in duration-300">
-                          <h2 className="text-xl font-bold mb-4 flex items-center gap-2">
-                              <Video className="text-atalaia-neon" /> 
-                              {selectedNeighborhood.name}
-                          </h2>
-                          <CameraIframe url={selectedNeighborhood.iframeUrl} />
+                      <div className="animate-in fade-in zoom-in duration-300 mt-4">
+                          <div className="flex items-center justify-between mb-4">
+                              <h2 className="text-xl font-bold flex items-center gap-2 text-white">
+                                  <Video className="text-atalaia-neon" /> {selectedNeighborhood.name}
+                              </h2>
+                              <span className="px-2 py-1 bg-red-600 text-white text-[10px] font-bold rounded uppercase animate-pulse">Ao Vivo</span>
+                          </div>
+                          <UniversalPlayer url={selectedNeighborhood.iframeUrl} />
                       </div>
                   ) : (
-                      <div className="h-64 flex items-center justify-center border border-dashed border-gray-700 rounded-xl bg-black/20">
-                          <p className="text-gray-500">Selecione um bairro para visualizar as câmeras.</p>
+                      <div className="h-40 flex items-center justify-center border border-dashed border-gray-800 rounded-xl bg-black/20">
+                          <p className="text-gray-500">Selecione uma câmera acima.</p>
                       </div>
                   )}
                 </>
@@ -207,71 +317,110 @@ const Cameras: React.FC = () => {
           </div>
       )}
 
-      {/* INSERT MODE (ADMIN) */}
-      {activeTab === 'insert' && user?.role === UserRole.ADMIN && (
-          <Card className="max-w-2xl mx-auto p-8">
-              <h2 className="text-xl font-bold mb-6 text-white">Novo Bairro Monitorado</h2>
-              <form onSubmit={handleCreateNeighborhood} className="space-y-6">
-                  <Input 
-                    label="Nome do Bairro" 
-                    value={newHoodName} 
-                    onChange={e => setNewHoodName(e.target.value)} 
-                    placeholder="Ex: Jardim Paulista"
-                    required
-                  />
-                  
-                  <div>
-                    <label className="block text-xs font-medium text-gray-400 mb-1.5 uppercase tracking-wider">URL do Iframe</label>
-                    <textarea 
-                        className="w-full bg-black/50 border border-atalaia-border rounded-lg px-4 py-2.5 text-white placeholder-gray-600 focus:outline-none focus:border-atalaia-neon focus:ring-1 focus:ring-atalaia-neon h-32 font-mono text-sm"
-                        placeholder="Cole a URL ou o código do iframe aqui..."
-                        value={newHoodIframe}
-                        onChange={e => setNewHoodIframe(e.target.value)}
-                        required
-                    />
-                    <p className="text-xs text-gray-500 mt-2">O sistema extrairá a URL automaticamente se você colar a tag &lt;iframe&gt; completa.</p>
-                  </div>
+      {/* MANAGE MODE (ADMIN - NEW STRUCTURE) */}
+      {activeTab === 'manage' && user?.role === UserRole.ADMIN && (
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+              {/* Left: Create Form */}
+              <div className="lg:col-span-1">
+                  <Card className="p-6 sticky top-4">
+                      <h2 className="text-lg font-bold mb-4 text-white flex items-center gap-2">
+                          <Plus size={18} className="text-atalaia-neon" /> Novo Bairro
+                      </h2>
+                      <form onSubmit={handleCreateNeighborhood} className="space-y-4">
+                          <Input 
+                            label="Nome" 
+                            value={newHoodName} 
+                            onChange={e => setNewHoodName(e.target.value)} 
+                            placeholder="Ex: Centro"
+                            required
+                          />
+                          <div>
+                            <label className="text-xs font-medium text-gray-400 mb-1 block uppercase">Código Iframe da Câmera</label>
+                            <textarea 
+                                className="w-full bg-black/50 border border-atalaia-border rounded-lg px-3 py-2 text-white text-xs h-32 focus:border-atalaia-neon focus:outline-none resize-none font-mono"
+                                placeholder='<iframe src="https://..."></iframe>'
+                                value={newHoodIframe}
+                                onChange={e => setNewHoodIframe(e.target.value)}
+                                required
+                            />
+                            <p className="text-[10px] text-gray-500 mt-1">Cole o código completo do Iframe ou apenas a URL.</p>
+                          </div>
+                          <div className="grid grid-cols-2 gap-2">
+                              <Input label="Lat" value={newHoodLat} onChange={e => setNewHoodLat(e.target.value)} type="number" step="any"/>
+                              <Input label="Lng" value={newHoodLng} onChange={e => setNewHoodLng(e.target.value)} type="number" step="any"/>
+                          </div>
+                          <Button type="submit" className="w-full">Cadastrar</Button>
+                      </form>
+                  </Card>
+              </div>
 
-                  <div className="grid grid-cols-2 gap-4">
-                      <div className="col-span-2">
-                           <h4 className="text-sm font-bold text-gray-300 mb-2 flex items-center gap-2">
-                               <MapPin size={16} className="text-atalaia-neon"/> Localização no Mapa Comunitário
-                           </h4>
+              {/* Right: Management Table (Better for Deletion) */}
+              <div className="lg:col-span-2">
+                  <Card className="p-0 overflow-hidden">
+                      <div className="p-4 border-b border-white/10 bg-[#151515] flex justify-between items-center">
+                          <h2 className="font-bold text-white flex items-center gap-2">
+                              <List size={18} className="text-atalaia-neon" /> Bairros Cadastrados
+                          </h2>
+                          <span className="text-xs text-gray-500">{neighborhoods.length} registros</span>
                       </div>
-                      <Input 
-                        label="Latitude" 
-                        value={newHoodLat} 
-                        onChange={e => setNewHoodLat(e.target.value)} 
-                        placeholder="-27.5935"
-                        type="number"
-                        step="any"
-                      />
-                      <Input 
-                        label="Longitude" 
-                        value={newHoodLng} 
-                        onChange={e => setNewHoodLng(e.target.value)} 
-                        placeholder="-48.5585"
-                        type="number"
-                        step="any"
-                      />
-                      <p className="col-span-2 text-xs text-gray-500">
-                          Preencha para exibir o ícone da câmera no mapa. (Ex: Google Maps)
-                      </p>
-                  </div>
-                  
-                  <div className="flex justify-end pt-4">
-                      <Button type="submit">Cadastrar Bairro</Button>
-                  </div>
-              </form>
-          </Card>
+                      
+                      <div className="overflow-x-auto">
+                          <table className="w-full text-left text-sm text-gray-400">
+                              <thead className="bg-black text-gray-200 uppercase text-xs">
+                                  <tr>
+                                      <th className="px-6 py-3 font-medium">Nome do Bairro</th>
+                                      <th className="px-6 py-3 font-medium">Câmera</th>
+                                      <th className="px-6 py-3 font-medium text-right">Ações</th>
+                                  </tr>
+                              </thead>
+                              <tbody className="divide-y divide-white/5">
+                                  {neighborhoods.map((hood) => (
+                                      <tr key={hood.id} className="hover:bg-white/5 transition-colors">
+                                          <td className="px-6 py-4 font-medium text-white">{hood.name}</td>
+                                          <td className="px-6 py-4">
+                                              {hood.iframeUrl ? (
+                                                  <span className="text-green-500 text-xs flex items-center gap-1"><Check size={12}/> Configurada</span>
+                                              ) : (
+                                                  <span className="text-red-500 text-xs">Pendente</span>
+                                              )}
+                                          </td>
+                                          <td className="px-6 py-4 text-right">
+                                              <button 
+                                                  onClick={() => handleDeleteNeighborhood(hood.id, hood.name)}
+                                                  disabled={deletingId === hood.id}
+                                                  className="inline-flex items-center gap-2 px-3 py-1.5 bg-red-500/10 text-red-500 hover:bg-red-500 hover:text-white rounded-lg transition-all text-xs font-bold border border-red-500/20"
+                                                  title="Excluir Bairro"
+                                              >
+                                                  {deletingId === hood.id ? (
+                                                      <span className="animate-spin">...</span>
+                                                  ) : (
+                                                      <>
+                                                          <Trash2 size={14} /> EXCLUIR
+                                                      </>
+                                                  )}
+                                              </button>
+                                          </td>
+                                      </tr>
+                                  ))}
+                                  {neighborhoods.length === 0 && (
+                                      <tr>
+                                          <td colSpan={3} className="px-6 py-8 text-center text-gray-600 italic">
+                                              Nenhum bairro cadastrado. Utilize o formulário ao lado.
+                                          </td>
+                                      </tr>
+                                  )}
+                              </tbody>
+                          </table>
+                      </div>
+                  </Card>
+              </div>
+          </div>
       )}
 
       {/* PROTOCOL MODE (INTEGRATOR) */}
       {activeTab === 'protocol' && user?.role === UserRole.INTEGRATOR && (
           <Card className="max-w-2xl mx-auto p-8">
               <h2 className="text-xl font-bold mb-6 text-white">Gerador de Protocolos</h2>
-              <p className="text-gray-400 mb-6">Preencha os dados da câmera para gerar os links de transmissão e enviar ao administrador.</p>
-              
               <form onSubmit={handleGenerateProtocol} className="space-y-6">
                   <Input 
                     label="Nome da Câmera" 
@@ -280,73 +429,21 @@ const Cameras: React.FC = () => {
                     onChange={e => setProtocolCameraName(e.target.value.toLowerCase())}
                     required
                   />
-                  <p className="text-xs text-yellow-500/80 -mt-4 mb-4">Use apenas letras minúsculas e números.</p>
-                  
-                  <div className="grid grid-cols-2 gap-4 pt-2 border-t border-white/5">
-                      <div className="col-span-2">
-                          <label className="text-sm font-bold text-gray-300 flex items-center gap-2">
-                             <MapPin size={16} className="text-atalaia-neon"/> Coordenadas Geográficas
-                          </label>
-                          <p className="text-xs text-gray-500 mt-1">Copie do Google Maps para o mapa comunitário.</p>
-                      </div>
-                      <Input 
-                        label="Latitude" 
-                        value={protocolLat} 
-                        onChange={e => setProtocolLat(e.target.value)} 
-                        placeholder="-27.5935"
-                        type="number"
-                        step="any"
-                      />
-                      <Input 
-                        label="Longitude" 
-                        value={protocolLng} 
-                        onChange={e => setProtocolLng(e.target.value)} 
-                        placeholder="-48.5585"
-                        type="number"
-                        step="any"
-                      />
+                  <div className="grid grid-cols-2 gap-4">
+                      <Input label="Latitude" value={protocolLat} onChange={e => setProtocolLat(e.target.value)} type="number" step="any" />
+                      <Input label="Longitude" value={protocolLng} onChange={e => setProtocolLng(e.target.value)} type="number" step="any" />
                   </div>
-
-                  <Button type="submit" className="w-full">Gerar Protocolos e Revisar</Button>
+                  <Button type="submit" className="w-full">Gerar e Revisar</Button>
               </form>
-
               {generatedProtocol && (
                   <div className="mt-8 p-6 bg-black/40 rounded-xl border border-atalaia-border animate-in slide-in-from-bottom-2">
-                      <h3 className="font-bold text-atalaia-neon mb-4">Protocolos Gerados:</h3>
-                      
-                      <div className="space-y-4 mb-6">
-                          <div>
-                              <label className="text-xs text-gray-500 uppercase">RTMP (Streaming)</label>
-                              <div className="flex items-center gap-2 bg-black border border-gray-800 p-2 rounded text-sm font-mono text-gray-300">
-                                  <span className="truncate flex-1">{generatedProtocol.rtmp}</span>
-                                  <button onClick={() => navigator.clipboard.writeText(generatedProtocol.rtmp)} className="text-atalaia-neon hover:text-white text-xs uppercase font-bold">Copiar</button>
-                              </div>
-                          </div>
-                          
-                          <div>
-                              <label className="text-xs text-gray-500 uppercase">RTSP (Integração)</label>
-                              <div className="flex items-center gap-2 bg-black border border-gray-800 p-2 rounded text-sm font-mono text-gray-300">
-                                  <span className="truncate flex-1">{generatedProtocol.rtsp}</span>
-                                  <button onClick={() => navigator.clipboard.writeText(generatedProtocol.rtsp)} className="text-atalaia-neon hover:text-white text-xs uppercase font-bold">Copiar</button>
-                              </div>
-                          </div>
-
-                          {(generatedProtocol.lat || generatedProtocol.lng) && (
-                              <div className="grid grid-cols-2 gap-2">
-                                  <div>
-                                      <label className="text-xs text-gray-500 uppercase">Latitude</label>
-                                      <div className="bg-black border border-gray-800 p-2 rounded text-sm font-mono text-gray-300">{generatedProtocol.lat}</div>
-                                  </div>
-                                  <div>
-                                      <label className="text-xs text-gray-500 uppercase">Longitude</label>
-                                      <div className="bg-black border border-gray-800 p-2 rounded text-sm font-mono text-gray-300">{generatedProtocol.lng}</div>
-                                  </div>
-                              </div>
-                          )}
-                      </div>
-
-                      <Button onClick={handleSendToAdmin} variant="secondary" className="w-full flex items-center justify-center gap-2">
-                          <Send size={18} /> Enviar para Admin Master
+                       <h3 className="font-bold text-atalaia-neon mb-4">Gerado:</h3>
+                       <div className="space-y-2 mb-4 font-mono text-xs text-gray-300">
+                           <div className="bg-black p-2 border border-gray-800 rounded">{generatedProtocol.rtmp}</div>
+                           <div className="bg-black p-2 border border-gray-800 rounded">{generatedProtocol.rtsp}</div>
+                       </div>
+                       <Button onClick={handleSendToAdmin} variant="secondary" className="w-full flex items-center justify-center gap-2">
+                          <Send size={18} /> Enviar para Admin
                       </Button>
                   </div>
               )}
@@ -355,37 +452,56 @@ const Cameras: React.FC = () => {
 
       {/* UPGRADE MODAL */}
       <Modal isOpen={showUpgradeModal} onClose={() => setShowUpgradeModal(false)}>
-        <div className="p-6">
-            <h2 className="text-2xl font-bold text-white text-center mb-2">Desbloqueie o Monitoramento</h2>
-            <p className="text-gray-400 text-center mb-8">Escolha um plano para acessar as câmeras em tempo real.</p>
+        <div className="p-2">
+            <h2 className="text-2xl font-bold text-white mb-2 text-center">Desbloquear Monitoramento</h2>
+            <p className="text-gray-400 mb-6 text-center text-sm">Escolha um plano para acessar as câmeras em tempo real.</p>
             
-            <div className="grid md:grid-cols-2 gap-6">
-                {/* Family Plan */}
-                <div className="border border-atalaia-neon rounded-xl p-6 bg-atalaia-neon/5 relative">
-                     <div className="absolute top-0 left-1/2 -translate-x-1/2 bg-atalaia-neon text-black text-[10px] font-bold px-2 py-0.5 rounded-b">RECOMENDADO</div>
-                     <h3 className="text-lg font-bold text-white mb-2">Família</h3>
-                     <div className="text-2xl font-bold text-atalaia-neon mb-4">R$ 39,90<span className="text-xs text-gray-500 font-normal">/mês</span></div>
-                     <ul className="space-y-2 mb-6">
-                        <li className="flex items-center gap-2 text-sm text-gray-300"><Check size={14} className="text-atalaia-neon" /> Acesso a Câmeras</li>
-                        <li className="flex items-center gap-2 text-sm text-gray-300"><Check size={14} className="text-atalaia-neon" /> Histórico de 30 dias</li>
-                        <li className="flex items-center gap-2 text-sm text-gray-300"><Check size={14} className="text-atalaia-neon" /> Alertas Ilimitados</li>
-                     </ul>
-                     <Button className="w-full py-2 text-sm">Escolher Família</Button>
-                </div>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                {plans.map(plan => (
+                    <div 
+                        key={plan.id} 
+                        className={`
+                            border rounded-xl p-6 relative flex flex-col justify-between transition-all hover:-translate-y-1
+                            ${plan.id === 'FAMILY' ? 'bg-[#0f1a12] border-atalaia-neon/50 shadow-[0_0_15px_rgba(0,255,102,0.1)]' : 'bg-[#111] border-white/10 hover:border-white/30'}
+                        `}
+                    >
+                        {plan.id === 'FAMILY' && (
+                             <div className="absolute -top-3 left-1/2 -translate-x-1/2 bg-atalaia-neon text-black text-[10px] font-bold px-3 py-1 rounded-full uppercase">
+                                 Mais Escolhido
+                             </div>
+                        )}
+                        
+                        <div>
+                            <h3 className="text-xl font-bold text-white">{plan.name}</h3>
+                            <div className="flex items-end gap-1 my-3">
+                                <span className={`text-3xl font-bold ${plan.id === 'FAMILY' ? 'text-atalaia-neon' : 'text-white'}`}>
+                                    R$ {plan.price}
+                                </span>
+                                <span className="text-xs text-gray-500 mb-1">/mês</span>
+                            </div>
+                            <ul className="space-y-2 text-xs text-gray-300 mb-6">
+                                {plan.features.slice(0, 4).map((f, i) => (
+                                    <li key={i} className="flex items-center gap-2">
+                                        <Check size={12} className="text-atalaia-neon" /> {f}
+                                    </li>
+                                ))}
+                            </ul>
+                        </div>
 
-                {/* Premium Plan */}
-                <div className="border border-white/10 rounded-xl p-6 bg-[#0a0a0a]">
-                     <h3 className="text-lg font-bold text-white mb-2">Prêmio</h3>
-                     <div className="text-2xl font-bold text-white mb-4">R$ 79,90<span className="text-xs text-gray-500 font-normal">/mês</span></div>
-                     <ul className="space-y-2 mb-6">
-                        <li className="flex items-center gap-2 text-sm text-gray-300"><Check size={14} className="text-gray-500" /> Tudo do plano Família</li>
-                        <li className="flex items-center gap-2 text-sm text-gray-300"><Check size={14} className="text-gray-500" /> IA Detectora de Anomalias</li>
-                        <li className="flex items-center gap-2 text-sm text-gray-300"><Check size={14} className="text-gray-500" /> Câmeras Ilimitadas</li>
-                     </ul>
-                     <Button variant="outline" className="w-full py-2 text-sm">Escolher Prêmio</Button>
-                </div>
+                        <Button 
+                            onClick={() => handleUpgradePlan(plan.id)}
+                            disabled={!!processingUpgrade}
+                            variant={plan.id === 'FAMILY' ? 'primary' : 'outline'}
+                            className="w-full text-sm"
+                        >
+                            {processingUpgrade === plan.id ? 'Processando...' : `Assinar ${plan.name}`}
+                        </Button>
+                    </div>
+                ))}
             </div>
-            <p className="text-center text-xs text-gray-500 mt-6">Pagamento seguro via Cartão ou PIX. Cancele quando quiser.</p>
+            {plans.length === 0 && (
+                <p className="text-center text-gray-500 py-8">Carregando planos...</p>
+            )}
         </div>
       </Modal>
 

@@ -3,9 +3,10 @@ import React, { useState, useEffect, useRef } from 'react';
 import Layout from '../components/Layout';
 import { useAuth } from '../context/AuthContext';
 import { Card, Input, Button } from '../components/UI';
-import { MessageCircle, Send } from 'lucide-react';
+import { MessageCircle, Send, AlertTriangle, ShieldAlert, CheckCircle, Eye, ImageIcon } from 'lucide-react';
 import { MockService } from '../services/mockService';
 import { ChatMessage, UserRole } from '../types';
+import { supabase } from '../lib/supabaseClient';
 
 const Chat: React.FC = () => {
   const { user } = useAuth();
@@ -14,22 +15,72 @@ const Chat: React.FC = () => {
   const chatEndRef = useRef<HTMLDivElement>(null);
 
   const fetchMessages = async () => {
-      if (user?.neighborhoodId) {
-        const data = await MockService.getMessages(user.neighborhoodId);
-        setMessages(data);
-      }
+      // Allow fetching even if neighborhoodId is undefined (for testing or global messages)
+      const data = await MockService.getMessages(user?.neighborhoodId || '');
+      setMessages(data);
   };
 
   useEffect(() => {
       fetchMessages();
-      // Poll for new messages every 3s to simulate realtime
-      const interval = setInterval(fetchMessages, 3000);
-      return () => clearInterval(interval);
+
+      // SETUP REALTIME SUBSCRIPTION
+      const channel = supabase
+        .channel(`chat_global`) // Listen to global changes, we filter in callback
+        .on(
+          'postgres_changes',
+          {
+            event: 'INSERT',
+            schema: 'public',
+            table: 'chat_messages',
+          },
+          (payload) => {
+            const newMsg = payload.new as any;
+            
+            // Logic to check if message belongs to my neighborhood
+            // If user has no neighborhood, they might see everything or nothing depending on logic.
+            // Here we assume strict filtering:
+            
+            const myHood = user?.neighborhoodId;
+            const msgHood = newMsg.neighborhood_id;
+
+            // Condition: 
+            // 1. Exact Match
+            // 2. Or message is global (null) and user allows it
+            // 3. Or user is undefined (maybe allow seeing all for debugging? No, keep safe)
+            
+            const isMatch = (myHood == msgHood) || (!msgHood && !myHood);
+
+            if (isMatch) {
+                const formattedMsg: ChatMessage = {
+                    id: newMsg.id,
+                    neighborhoodId: newMsg.neighborhood_id,
+                    userId: newMsg.user_id,
+                    userName: newMsg.user_name,
+                    userRole: newMsg.user_role as UserRole,
+                    text: newMsg.text,
+                    timestamp: new Date(newMsg.timestamp),
+                    isSystemAlert: newMsg.is_system_alert,
+                    alertType: newMsg.alert_type,
+                    image: newMsg.image
+                };
+
+                setMessages((prev) => {
+                    // Prevent duplicates
+                    if (prev.some(m => m.id === formattedMsg.id)) return prev;
+                    return [...prev, formattedMsg];
+                });
+            }
+          }
+        )
+        .subscribe();
+
+      return () => {
+          supabase.removeChannel(channel);
+      };
   }, [user]);
 
-  // Optimized Scroll Logic
+  // Scroll to bottom when messages change
   const lastMessageId = messages.length > 0 ? messages[messages.length - 1].id : null;
-  
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages.length, lastMessageId]);
@@ -38,15 +89,36 @@ const Chat: React.FC = () => {
       e.preventDefault();
       if (!newMessage.trim() || !user) return;
 
-      await MockService.sendMessage({
+      const tempId = crypto.randomUUID();
+      const msgText = newMessage;
+      
+      // Optimistic UI Update
+      const optimisticMsg: ChatMessage = {
+          id: tempId,
           neighborhoodId: user.neighborhoodId || 'unknown',
           userId: user.id,
           userName: user.name,
           userRole: user.role,
-          text: newMessage,
-      });
+          text: msgText,
+          timestamp: new Date()
+      };
+      
+      setMessages(prev => [...prev, optimisticMsg]);
       setNewMessage('');
-      await fetchMessages();
+
+      try {
+        await MockService.sendMessage({
+            neighborhoodId: user.neighborhoodId || undefined, // Send undefined to sanitize to null in service
+            userId: user.id,
+            userName: user.name,
+            userRole: user.role,
+            text: msgText,
+        });
+        // Realtime will confirm the message, logic in .on('postgres_changes') handles dedupe
+      } catch (err) {
+          console.error("Error sending message", err);
+          // Revert optimistic update if needed, but for now simple is better
+      }
   };
 
   const RoleBadge = ({ role }: { role: UserRole }) => {
@@ -61,6 +133,16 @@ const Chat: React.FC = () => {
               {role === UserRole.SCR ? 'MOTOVIGIA' : role}
           </span>
       );
+  };
+
+  const getAlertIcon = (type: string) => {
+      switch(type) {
+          case 'PANIC': return <ShieldAlert size={24} className="mb-1" />;
+          case 'DANGER': return <AlertTriangle size={24} className="mb-1" />;
+          case 'SUSPICIOUS': return <Eye size={24} className="mb-1" />;
+          case 'OK': return <CheckCircle size={24} className="mb-1" />;
+          default: return <MessageCircle size={24} />;
+      }
   };
 
   return (
@@ -94,32 +176,57 @@ const Chat: React.FC = () => {
                         const isAlert = msg.isSystemAlert;
                         
                         return (
-                            <div key={msg.id} className={`flex flex-col ${isMe ? 'items-end' : 'items-start'}`}>
-                                <div className={`flex items-baseline gap-2 mb-1 ${isMe ? 'flex-row-reverse' : 'flex-row'}`}>
-                                    <span className="text-xs font-bold text-gray-300">{msg.userName}</span>
-                                    <RoleBadge role={msg.userRole} />
-                                    <span className="text-[10px] text-gray-600">
-                                        {new Date(msg.timestamp).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}
-                                    </span>
-                                </div>
+                            <div key={msg.id} className={`flex flex-col ${isMe ? 'items-end' : 'items-start'} animate-in slide-in-from-bottom-2`}>
+                                {!isAlert && (
+                                    <div className={`flex items-baseline gap-2 mb-1 ${isMe ? 'flex-row-reverse' : 'flex-row'}`}>
+                                        <span className="text-xs font-bold text-gray-300">{msg.userName}</span>
+                                        <RoleBadge role={msg.userRole} />
+                                        <span className="text-[10px] text-gray-600">
+                                            {new Date(msg.timestamp).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}
+                                        </span>
+                                    </div>
+                                )}
                                 
-                                <div 
-                                    className={`max-w-[85%] rounded-2xl px-4 py-3 text-sm leading-relaxed shadow-sm
-                                        ${isAlert 
-                                            ? `w-full text-center font-bold border-2 ${
-                                                msg.alertType === 'PANIC' ? 'bg-red-900/20 border-red-600 text-red-500' : 
-                                                msg.alertType === 'DANGER' ? 'bg-orange-900/20 border-orange-600 text-orange-500' :
-                                                msg.alertType === 'SUSPICIOUS' ? 'bg-yellow-900/20 border-yellow-600 text-yellow-500' :
-                                                'bg-green-900/20 border-green-600 text-green-500'
-                                                }` 
-                                            : isMe 
-                                                ? 'bg-atalaia-neon text-black rounded-tr-none' 
-                                                : 'bg-[#222] text-gray-200 border border-white/5 rounded-tl-none'
-                                        }
-                                    `}
-                                >
-                                    {msg.text}
-                                </div>
+                                {isAlert ? (
+                                    <div className="w-full flex justify-center my-2">
+                                        <div className={`
+                                            flex flex-col items-center justify-center p-4 rounded-xl border-2 w-[90%] md:w-[60%]
+                                            ${msg.alertType === 'PANIC' ? 'bg-red-900/30 border-red-500/50 text-red-500' : 
+                                              msg.alertType === 'DANGER' ? 'bg-orange-900/30 border-orange-500/50 text-orange-500' :
+                                              msg.alertType === 'SUSPICIOUS' ? 'bg-yellow-900/30 border-yellow-500/50 text-yellow-500' :
+                                              'bg-green-900/30 border-green-500/50 text-green-500'}
+                                        `}>
+                                            <div className="flex items-center gap-2 mb-2">
+                                                {getAlertIcon(msg.alertType || '')}
+                                                <span className="font-black text-lg uppercase tracking-wider">{msg.text}</span>
+                                            </div>
+                                            
+                                            {/* RENDER ALERT IMAGE IF EXISTS */}
+                                            {msg.image && (
+                                                <div className="mb-2 w-full max-h-60 overflow-hidden rounded-lg border border-black/50 shadow-lg">
+                                                    <img src={msg.image} alt="Evidência" className="w-full h-full object-cover" />
+                                                </div>
+                                            )}
+
+                                            <div className="flex items-center gap-2 text-xs opacity-70 mt-1">
+                                                <span>Acionado por: <strong>{msg.userName}</strong></span>
+                                                <span>•</span>
+                                                <span>{new Date(msg.timestamp).toLocaleTimeString()}</span>
+                                            </div>
+                                        </div>
+                                    </div>
+                                ) : (
+                                    <div 
+                                        className={`max-w-[85%] rounded-2xl px-4 py-3 text-sm leading-relaxed shadow-sm
+                                            ${isMe 
+                                                    ? 'bg-atalaia-neon text-black rounded-tr-none' 
+                                                    : 'bg-[#222] text-gray-200 border border-white/5 rounded-tl-none'
+                                            }
+                                        `}
+                                    >
+                                        {msg.text}
+                                    </div>
+                                )}
                             </div>
                         );
                     })}

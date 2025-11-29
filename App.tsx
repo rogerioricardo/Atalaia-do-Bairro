@@ -11,10 +11,24 @@ import Chat from './pages/Chat';
 import Profile from './pages/Profile';
 import MapPage from './pages/MapPage';
 import IntegratorUsers from './pages/IntegratorUsers';
+import { ShieldCheck, Loader2 } from 'lucide-react';
 
 // Protected Route Component
 const ProtectedRoute: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const { isAuthenticated } = useAuth();
+  const { isAuthenticated, loading } = useAuth();
+
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-[#050505] flex flex-col items-center justify-center text-white">
+        <Loader2 size={48} className="text-atalaia-neon animate-spin mb-4" />
+        <div className="flex items-center gap-2 text-gray-400">
+           <ShieldCheck size={18} />
+           <span className="text-sm font-medium tracking-wider uppercase">Acessando link seguro...</span>
+        </div>
+      </div>
+    );
+  }
+
   if (!isAuthenticated) {
     return <Navigate to="/login" replace />;
   }
@@ -70,7 +84,6 @@ const AppRoutes = () => {
         </ProtectedRoute>
       } />
       
-      {/* Admin specific routes would be here, mapped to existing pages for now */}
       <Route path="/admin/bairros" element={<ProtectedRoute><Cameras /></ProtectedRoute>} />
       
       <Route path="*" element={<Navigate to="/" replace />} />

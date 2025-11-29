@@ -1,16 +1,17 @@
 
-import React, { useState } from 'react';
+import React, { useState, useRef } from 'react';
 import Layout from '../components/Layout';
 import { useAuth } from '../context/AuthContext';
 import { Card } from '../components/UI';
-import { AlertTriangle, ShieldAlert, CheckCircle, Eye, Phone, Shield, Ambulance, Flame, Headset } from 'lucide-react';
+import { AlertTriangle, ShieldAlert, CheckCircle, Eye, Phone, Shield, Ambulance, Flame, Headset, Camera } from 'lucide-react';
 import { MockService } from '../services/mockService';
 
 const Alerts: React.FC = () => {
   const { user } = useAuth();
   const [loading, setLoading] = useState(false);
+  const cameraInputRef = useRef<HTMLInputElement>(null);
 
-  const handlePanic = async (type: 'PANIC' | 'DANGER' | 'SUSPICIOUS' | 'OK') => {
+  const handlePanic = async (type: 'PANIC' | 'DANGER' | 'SUSPICIOUS' | 'OK', imageBase64?: string) => {
       if(!user) return;
       setLoading(true);
       
@@ -19,10 +20,16 @@ const Alerts: React.FC = () => {
             type,
             userId: user.id,
             userName: user.name,
-            neighborhoodId: user.neighborhoodId || 'unknown',
-            userRole: user.role
+            neighborhoodId: user.neighborhoodId || undefined,
+            userRole: user.role,
+            image: imageBase64
         });
-        alert('Alerta enviado com sucesso!');
+        
+        if (imageBase64) {
+            alert('Alerta com foto enviado com sucesso!');
+        } else {
+            alert('Alerta enviado com sucesso!');
+        }
       } catch (e) {
         console.error(e);
         alert('Erro ao enviar alerta.');
@@ -31,15 +38,41 @@ const Alerts: React.FC = () => {
       }
   };
 
+  const handleButtonClick = (type: 'PANIC' | 'DANGER' | 'SUSPICIOUS' | 'OK') => {
+      if (type === 'SUSPICIOUS') {
+          // Trigger camera input for suspicious activity
+          cameraInputRef.current?.click();
+      } else {
+          // Normal flow for others
+          handlePanic(type);
+      }
+  };
+
+  const handleCameraCapture = (e: React.ChangeEvent<HTMLInputElement>) => {
+      const file = e.target.files?.[0];
+      if (file) {
+          const reader = new FileReader();
+          reader.onloadend = () => {
+              const base64String = reader.result as string;
+              // Once image is captured, trigger the alert
+              handlePanic('SUSPICIOUS', base64String);
+          };
+          reader.readAsDataURL(file);
+      }
+      // Reset input so it can be triggered again even if same file
+      e.target.value = '';
+  };
+
   const PanicButton = ({ type, icon: Icon, label, color, bg }: any) => (
       <button
-        onClick={() => handlePanic(type)}
+        onClick={() => handleButtonClick(type)}
         disabled={loading}
         className={`relative overflow-hidden group p-6 rounded-2xl border transition-all duration-300 hover:scale-105 active:scale-95 flex flex-col items-center justify-center gap-4 h-40 w-full shadow-lg ${bg} ${color}`}
       >
           <div className="absolute inset-0 bg-gradient-to-br from-white/10 to-transparent opacity-0 group-hover:opacity-100 transition-opacity" />
           <Icon size={40} className="z-10" />
           <span className="font-bold text-xl z-10 text-center leading-tight">{label}</span>
+          {type === 'SUSPICIOUS' && <Camera size={16} className="absolute bottom-4 right-4 opacity-50" />}
       </button>
   );
 
@@ -50,6 +83,16 @@ const Alerts: React.FC = () => {
                 <h1 className="text-4xl font-bold text-white mb-2">Central de Alertas</h1>
                 <p className="text-gray-400 text-lg">Acione a rede de proteção da sua comunidade.</p>
             </div>
+            
+            {/* Hidden Input for Camera */}
+            <input 
+                type="file" 
+                accept="image/*" 
+                capture="environment" 
+                ref={cameraInputRef} 
+                onChange={handleCameraCapture}
+                className="hidden" 
+            />
 
             <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
                 <PanicButton 

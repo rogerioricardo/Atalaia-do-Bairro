@@ -1,3 +1,4 @@
+
 import React, { createContext, useContext, useState, useEffect } from 'react';
 import { User, UserRole } from '../types';
 import { supabase } from '../lib/supabaseClient';
@@ -35,35 +36,80 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   });
 
   const fetchProfile = async (userId: string, email: string) => {
-      const { data, error } = await supabase
-          .from('profiles')
-          .select('*')
-          .eq('id', userId)
-          .single();
+      // Fire and forget - não bloqueia a UI
+      try {
+          const { data, error } = await supabase
+              .from('profiles')
+              .select('*')
+              .eq('id', userId)
+              .single();
 
-      if (data) {
-          setUser(mapProfile(data));
-      } else if (error && error.code === 'PGRST116') {
-          // Profile doesn't exist yet (should be created by trigger, but just in case)
-          console.log("Profile not found, waiting for trigger...");
+          if (data) {
+              setUser(mapProfile(data));
+          } else if (!data) {
+              // SELF HEALING
+              console.warn("Profile missing, attempting self-healing...");
+              const { data: newProfile } = await supabase
+                  .from('profiles')
+                  .insert([{
+                      id: userId,
+                      email: email,
+                      name: email.split('@')[0],
+                      role: 'RESIDENT',
+                      plan: 'FREE'
+                  }])
+                  .select()
+                  .single();
+              
+              if (newProfile) {
+                  setUser(mapProfile(newProfile));
+              }
+          }
+      } catch (e) {
+          console.error("Background profile fetch error:", e);
       }
   };
 
   useEffect(() => {
-    // 1. Check active session
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      if (session?.user) {
-        fetchProfile(session.user.id, session.user.email!);
-      } else {
-        setLoading(false);
-      }
-    });
+    const initAuth = async () => {
+        try {
+            const { data: { session } } = await supabase.auth.getSession();
+            if (session?.user) {
+                // Set optimistic user first
+                setUser({
+                    id: session.user.id,
+                    email: session.user.email!,
+                    name: session.user.user_metadata?.name || session.user.email!.split('@')[0],
+                    role: (session.user.user_metadata?.role as UserRole) || UserRole.RESIDENT,
+                    plan: 'FREE', // Default until fetch
+                    neighborhoodId: session.user.user_metadata?.neighborhood_id
+                });
+                // Fetch full details in background
+                fetchProfile(session.user.id, session.user.email!);
+            }
+        } catch (error) {
+            console.error("Auth init error", error);
+        } finally {
+            setLoading(false);
+        }
+    };
+    initAuth();
 
-    // 2. Listen for auth changes
-    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (_event, session) => {
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
       if (session?.user) {
-        await fetchProfile(session.user.id, session.user.email!);
-      } else {
+         if (!user) {
+             // Re-apply optimistic update if user state was lost
+             setUser({
+                id: session.user.id,
+                email: session.user.email!,
+                name: session.user.user_metadata?.name || session.user.email!.split('@')[0],
+                role: (session.user.user_metadata?.role as UserRole) || UserRole.RESIDENT,
+                plan: 'FREE',
+                neighborhoodId: session.user.user_metadata?.neighborhood_id
+            });
+            fetchProfile(session.user.id, session.user.email!);
+         }
+      } else if (event === 'SIGNED_OUT') {
         setUser(null);
       }
       setLoading(false);
@@ -73,8 +119,29 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   }, []);
 
   const login = async (email: string, password: string) => {
-    const { data, error } = await supabase.auth.signInWithPassword({ email, password });
-    if (error) throw error;
+    setLoading(true);
+    try {
+        const { data, error } = await supabase.auth.signInWithPassword({ email, password });
+        if (error) throw error;
+
+        if (data.user) {
+            // LOGIN IMEDIATO (OPTIMISTIC)
+            // Não esperamos o banco de dados responder o perfil. Entramos na hora.
+            setUser({
+                id: data.user.id,
+                email: data.user.email!,
+                name: data.user.user_metadata?.name || email.split('@')[0],
+                role: (data.user.user_metadata?.role as UserRole) || UserRole.RESIDENT,
+                plan: 'FREE',
+                neighborhoodId: data.user.user_metadata?.neighborhood_id
+            });
+            
+            // Carrega detalhes em background
+            fetchProfile(data.user.id, data.user.email!);
+        }
+    } finally {
+        setLoading(false);
+    }
   };
 
   const register = async (email: string, password: string, role: UserRole, name: string, neighborhoodId?: string) => {
@@ -85,12 +152,12 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
               data: {
                   role: role,
                   name: name,
-                  neighborhood_id: neighborhoodId // Pass neighborhood to trigger
+                  neighborhood_id: neighborhoodId
               }
           }
       });
       if (error) throw error;
-      // Trigger will handle profile creation using this metadata
+      // Auto login logic will catch the session change
   };
 
   const logout = async () => {
@@ -101,7 +168,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const updateProfile = async (data: Partial<User>) => {
     if (!user) return;
     
-    // Map Frontend fields to DB snake_case
     const dbUpdates = {
         name: data.name,
         address: data.address,
@@ -116,7 +182,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     const { error } = await supabase.from('profiles').update(dbUpdates).eq('id', user.id);
     if (error) throw error;
     
-    // Optimistic update
     setUser({ ...user, ...data });
   };
 

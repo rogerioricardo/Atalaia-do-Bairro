@@ -51,6 +51,7 @@ export interface Alert {
   neighborhoodId: string;
   timestamp: Date;
   message?: string;
+  image?: string; // Base64 image string
 }
 
 export interface ChatMessage {
@@ -63,6 +64,7 @@ export interface ChatMessage {
   timestamp: Date;
   isSystemAlert?: boolean;
   alertType?: 'PANIC' | 'DANGER' | 'SUSPICIOUS' | 'OK';
+  image?: string; // Base64 image string
 }
 
 export interface Plan {
