@@ -81,11 +81,33 @@ export interface Plan {
 
 export interface Notification {
   id: string;
-  type: 'PROTOCOL_SUBMISSION';
+  userId?: string; // Se preenchido, é para um usuário específico
+  type: 'PROTOCOL_SUBMISSION' | 'PATROL_ALERT';
   title: string;
   message: string;
-  data: CameraProtocol;
+  data?: any;
   fromUserName: string;
   timestamp: Date;
   read: boolean;
+}
+
+export interface PatrolLog {
+    id: string;
+    userId: string;
+    targetUserId?: string; // Morador afetado
+    neighborhoodId: string;
+    timestamp: Date;
+    note: string;
+    lat?: number;
+    lng?: number;
+}
+
+export interface ServiceRequest {
+    id: string;
+    userId: string;
+    userName: string;
+    neighborhoodId: string;
+    requestType: 'ESCORT' | 'EXTRA_ROUND' | 'TRAVEL_NOTICE';
+    status: 'PENDING' | 'ACKNOWLEDGED' | 'COMPLETED';
+    createdAt: Date;
 }

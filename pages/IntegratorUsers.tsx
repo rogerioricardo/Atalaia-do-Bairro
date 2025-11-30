@@ -1,12 +1,11 @@
 
-
 import React, { useEffect, useState } from 'react';
 import Layout from '../components/Layout';
 import { useAuth } from '../context/AuthContext';
 import { User, UserRole } from '../types';
 import { MockService } from '../services/mockService';
 import { Card, Button, Input, Modal, Badge } from '../components/UI';
-import { UserPlus, Trash2, Mail, Phone, MapPin, Users, Search, Lock, CreditCard, Save, Key } from 'lucide-react';
+import { UserPlus, Trash2, Mail, Phone, MapPin, Users, Search, Lock, CreditCard, Save, Key, Crown, ArrowUpCircle, ArrowDownCircle } from 'lucide-react';
 
 const IntegratorUsers: React.FC = () => {
   const { user, updateProfile } = useAuth();
@@ -39,11 +38,13 @@ const IntegratorUsers: React.FC = () => {
   };
 
   useEffect(() => {
-    if (user?.role === UserRole.INTEGRATOR) {
+    if (user?.role === UserRole.INTEGRATOR || user?.role === UserRole.ADMIN) {
         fetchResidents();
-        // Load current config
-        setMpPublicKey(user.mpPublicKey || '');
-        setMpAccessToken(user.mpAccessToken || '');
+        if (user.role === UserRole.INTEGRATOR) {
+            // Load current config
+            setMpPublicKey(user.mpPublicKey || '');
+            setMpAccessToken(user.mpAccessToken || '');
+        }
     }
   }, [user]);
 
@@ -82,6 +83,20 @@ const IntegratorUsers: React.FC = () => {
       }
   };
 
+  const handleTogglePlan = async (resident: User) => {
+      const newPlan = resident.plan === 'PREMIUM' ? 'FREE' : 'PREMIUM';
+      const action = resident.plan === 'PREMIUM' ? 'remover o Premium de' : 'dar Premium para';
+      
+      if (window.confirm(`Deseja manualmente ${action} ${resident.name}?`)) {
+          try {
+              await MockService.updateUserPlan(resident.id, newPlan);
+              await fetchResidents();
+          } catch (e: any) {
+              alert('Erro ao alterar plano: ' + e.message);
+          }
+      }
+  };
+
   const handleSavePaymentConfig = async (e: React.FormEvent) => {
       e.preventDefault();
       if (!user) return;
@@ -116,39 +131,41 @@ const IntegratorUsers: React.FC = () => {
             </Button>
         </div>
 
-        {/* Payment Configuration Card */}
-        <Card className="p-6 border-atalaia-neon/30 bg-atalaia-neon/5">
-            <h2 className="text-xl font-bold text-white mb-4 flex items-center gap-2">
-                <CreditCard className="text-atalaia-neon" size={24} />
-                Configuração de Recebimento (Mercado Pago)
-            </h2>
-            <p className="text-sm text-gray-400 mb-6">
-                Insira suas credenciais de API do Mercado Pago para receber doações diretas dos moradores.
-                Os pagamentos cairão diretamente na sua conta.
-            </p>
-            <form onSubmit={handleSavePaymentConfig} className="grid grid-cols-1 md:grid-cols-2 gap-6 items-end">
-                <Input 
-                    label="Public Key"
-                    placeholder="APP_USR-..."
-                    value={mpPublicKey}
-                    onChange={e => setMpPublicKey(e.target.value)}
-                    type="password"
-                />
-                <Input 
-                    label="Access Token"
-                    placeholder="APP_USR-..."
-                    value={mpAccessToken}
-                    onChange={e => setMpAccessToken(e.target.value)}
-                    type="password"
-                />
-                <div className="md:col-span-2 flex justify-end">
-                    <Button type="submit" disabled={savingConfig}>
-                        <Save size={18} className="mr-2" />
-                        {savingConfig ? 'Salvando...' : 'Salvar Configurações'}
-                    </Button>
-                </div>
-            </form>
-        </Card>
+        {/* Payment Configuration Card - Only visible to actual Integrators (not Admins viewing the page) */}
+        {user?.role === UserRole.INTEGRATOR && (
+            <Card className="p-6 border-atalaia-neon/30 bg-atalaia-neon/5">
+                <h2 className="text-xl font-bold text-white mb-4 flex items-center gap-2">
+                    <CreditCard className="text-atalaia-neon" size={24} />
+                    Configuração de Recebimento (Mercado Pago)
+                </h2>
+                <p className="text-sm text-gray-400 mb-6">
+                    Insira suas credenciais de API do Mercado Pago para receber doações diretas dos moradores.
+                    Os pagamentos cairão diretamente na sua conta.
+                </p>
+                <form onSubmit={handleSavePaymentConfig} className="grid grid-cols-1 md:grid-cols-2 gap-6 items-end">
+                    <Input 
+                        label="Public Key"
+                        placeholder="APP_USR-..."
+                        value={mpPublicKey}
+                        onChange={e => setMpPublicKey(e.target.value)}
+                        type="password"
+                    />
+                    <Input 
+                        label="Access Token"
+                        placeholder="APP_USR-..."
+                        value={mpAccessToken}
+                        onChange={e => setMpAccessToken(e.target.value)}
+                        type="password"
+                    />
+                    <div className="md:col-span-2 flex justify-end">
+                        <Button type="submit" disabled={savingConfig}>
+                            <Save size={18} className="mr-2" />
+                            {savingConfig ? 'Salvando...' : 'Salvar Configurações'}
+                        </Button>
+                    </div>
+                </form>
+            </Card>
+        )}
 
         <div className="border-t border-white/10 pt-8">
             <h2 className="text-2xl font-bold text-white mb-6 flex items-center gap-2">
@@ -207,6 +224,15 @@ const IntegratorUsers: React.FC = () => {
                                         <Badge color={resident.plan === 'FREE' ? 'blue' : 'yellow'}>
                                             {resident.plan === 'FREE' ? 'GRATUITO' : 'PREMIUM'}
                                         </Badge>
+                                        {/* Botão de Troca Manual de Plano (Upgrade/Downgrade) */}
+                                        <button 
+                                            onClick={() => handleTogglePlan(resident)}
+                                            className="text-xs text-gray-500 hover:text-atalaia-neon flex items-center gap-1 bg-gray-800 px-2 py-0.5 rounded border border-gray-700 hover:border-atalaia-neon transition-colors"
+                                            title="Alterar Plano Manualmente"
+                                        >
+                                            {resident.plan === 'FREE' ? <ArrowUpCircle size={12}/> : <ArrowDownCircle size={12}/>}
+                                            {resident.plan === 'FREE' ? 'Dar Premium' : 'Remover'}
+                                        </button>
                                     </div>
                                     <div className="space-y-1 text-sm text-gray-400">
                                         <div className="flex items-center gap-2"><Mail size={14} /> {resident.email}</div>

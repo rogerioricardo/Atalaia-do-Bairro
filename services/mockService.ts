@@ -1,7 +1,7 @@
 
 
 import { supabase } from '../lib/supabaseClient';
-import { Neighborhood, Alert, CameraProtocol, ChatMessage, UserRole, User, Notification, Plan } from '../types';
+import { Neighborhood, Alert, CameraProtocol, ChatMessage, UserRole, User, Notification, Plan, ServiceRequest } from '../types';
 
 // Cache simples em memória para evitar requests repetidos de bairros
 let cachedNeighborhoods: Neighborhood[] | null = null;
@@ -141,6 +141,8 @@ export const MockService = {
     let query = supabase.from('alerts').select('*').order('timestamp', { ascending: false }).limit(50);
     const safeNeighborhoodId = sanitizeUUID(neighborhoodId);
 
+    // Se tiver ID de bairro, filtra. Se não tiver (Admin Global ou erro), tenta buscar tudo ou filtra nulo.
+    // Para SCR e Integrador, é crucial que eles vejam os alertas do bairro.
     if (safeNeighborhoodId) {
       query = query.eq('neighborhood_id', safeNeighborhoodId);
     }
@@ -232,10 +234,21 @@ export const MockService = {
     }]);
   },
 
-  getNotifications: async (): Promise<Notification[]> => {
-    const { data } = await supabase.from('notifications').select('*').order('timestamp', { ascending: false });
+  getNotifications: async (userId?: string): Promise<Notification[]> => {
+    // Busca notificações GLOBAIS (sem user_id) ou DIRECIONADAS (com user_id)
+    let query = supabase.from('notifications').select('*').order('timestamp', { ascending: false });
+    
+    if (userId) {
+        query = query.or(`user_id.eq.${userId},user_id.is.null`);
+    } else {
+        query = query.is('user_id', null);
+    }
+
+    const { data } = await query;
+
     return (data || []).map(n => ({
       id: n.id,
+      userId: n.user_id,
       type: n.type,
       title: n.title,
       message: n.message,
@@ -258,6 +271,7 @@ export const MockService = {
     if (safeNeighborhoodId) {
         query = query.eq('neighborhood_id', safeNeighborhoodId);
     } else {
+        // Se for global ou sem bairro, tenta pegar mensagens sem bairro ou falha silenciosa
         query = query.is('neighborhood_id', null);
     }
 
@@ -315,6 +329,7 @@ export const MockService = {
     if (safeNeighborhoodId) {
         query = query.eq('neighborhood_id', safeNeighborhoodId);
     }
+    // IMPORTANTE: Removemos filtros de role aqui. O frontend filtra.
     const { data } = await query;
     return (data || []).map(mapProfileToUser);
   },
@@ -378,9 +393,132 @@ export const MockService = {
           .eq('neighborhood_id', safeId)
           .eq('role', 'INTEGRATOR')
           .limit(1)
-          .maybeSingle(); // Pega o primeiro integrador encontrado
+          .maybeSingle();
 
       if (error || !data) return null;
       return mapProfileToUser(data);
+  },
+
+  // --- PATROL LOGS (SCR) ---
+  registerPatrol: async (userId: string, neighborhoodId: string, note: string, lat?: number, lng?: number, targetUserId?: string): Promise<void> => {
+      const safeNeighborhoodId = sanitizeUUID(neighborhoodId);
+      
+      // 1. Cria o log de ronda
+      const { error } = await supabase.from('patrol_logs').insert([{
+          user_id: userId,
+          neighborhood_id: safeNeighborhoodId,
+          target_user_id: targetUserId,
+          note: note,
+          lat: lat,
+          lng: lng
+      }]);
+      
+      if (error) {
+          console.error("Erro ao registrar ronda:", error);
+          throw new Error('Falha ao registrar check-in');
+      }
+
+      // 2. ATUALIZA A POSIÇÃO DO SCR NO PERFIL PARA O MAPA
+      if (lat && lng) {
+          try {
+              await supabase.from('profiles').update({
+                  lat: lat,
+                  lng: lng
+              }).eq('id', userId);
+          } catch (posError) {
+              console.warn("Erro ao atualizar posição do SCR no mapa:", posError);
+          }
+      }
+
+      // 3. Se houver um morador alvo, cria uma notificação para ele
+      if (targetUserId) {
+          try {
+              await supabase.from('notifications').insert([{
+                  user_id: targetUserId,
+                  type: 'PATROL_ALERT',
+                  title: 'Aviso do Motovigia (SCR)',
+                  message: `Registro de atividade em sua residência: ${note}`,
+                  from_user_name: 'Equipe Tática',
+                  read: false
+              }]);
+          } catch (notifError) {
+              console.warn("Erro ao notificar morador, mas log foi salvo:", notifError);
+          }
+      }
+  },
+
+  // --- SERVICE REQUESTS (PREMIUM TO SCR) ---
+  createServiceRequest: async (userId: string, userName: string, neighborhoodId: string, type: 'ESCORT' | 'EXTRA_ROUND' | 'TRAVEL_NOTICE'): Promise<void> => {
+      const safeNeighborhoodId = sanitizeUUID(neighborhoodId);
+      
+      const { error } = await supabase.from('service_requests').insert([{
+          user_id: userId,
+          user_name: userName,
+          neighborhood_id: safeNeighborhoodId,
+          request_type: type,
+          status: 'PENDING'
+      }]);
+
+      if (error) {
+          console.error("Erro ao solicitar serviço:", error);
+          throw new Error('Falha ao enviar solicitação ao SCR');
+      }
+      
+      // NOTIFICAR SCRs DO BAIRRO
+      try {
+          const scrs = await MockService.getNeighborhoodSCRs(safeNeighborhoodId || '');
+          const notifs = scrs.map(scr => ({
+              user_id: scr.id,
+              type: 'PATROL_ALERT',
+              title: 'NOVA SOLICITAÇÃO VIP',
+              message: `${userName} solicitou: ${type}`,
+              from_user_name: userName
+          }));
+
+          if (notifs.length > 0) {
+              const { error: notifError } = await supabase.from('notifications').insert(notifs);
+              if(notifError) console.error("Erro notificando SCR:", notifError);
+          }
+      } catch (err) {
+          console.error("Falha no fluxo de notificação SCR:", err);
+      }
+  },
+
+  getNeighborhoodSCRs: async (neighborhoodId: string): Promise<User[]> => {
+      const safeId = sanitizeUUID(neighborhoodId);
+      if (!safeId) return [];
+      
+      // Busca usuários SCR do bairro. 
+      // O RLS deve permitir que qualquer authenticated leia profiles.
+      const { data } = await supabase
+          .from('profiles')
+          .select('*')
+          .eq('neighborhood_id', safeId)
+          .eq('role', 'SCR');
+          
+      return (data || []).map(mapProfileToUser);
+  },
+
+  getServiceRequests: async (neighborhoodId: string): Promise<ServiceRequest[]> => {
+      const safeNeighborhoodId = sanitizeUUID(neighborhoodId);
+      if (!safeNeighborhoodId) return [];
+
+      const { data, error } = await supabase
+        .from('service_requests')
+        .select('*')
+        .eq('neighborhood_id', safeNeighborhoodId)
+        .order('created_at', { ascending: false });
+
+      if (error) return [];
+
+      return data.map((r: any) => ({
+          id: r.id,
+          userId: r.user_id,
+          userName: r.user_name,
+          neighborhoodId: r.neighborhood_id,
+          requestType: r.request_type,
+          status: r.status,
+          createdAt: new Date(r.created_at)
+      }));
   }
 };

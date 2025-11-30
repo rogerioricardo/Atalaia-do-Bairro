@@ -1,14 +1,269 @@
 
-
 import React, { useEffect, useState } from 'react';
 import Layout from '../components/Layout';
 import { useAuth } from '../context/AuthContext';
-import { UserRole, Alert, Neighborhood, Notification, User } from '../types';
-import { Card, Badge, Button, Input } from '../components/UI';
+import { UserRole, Alert, Neighborhood, Notification, User, ServiceRequest } from '../types';
+import { Card, Badge, Button, Modal, Input } from '../components/UI';
 import { MockService } from '../services/mockService';
-import { AlertTriangle, Video, Users, Activity, MapPin, Inbox, Copy, Trash2, Heart, DollarSign, Loader2 } from 'lucide-react';
+import { 
+    AlertTriangle, Video, Users, Activity, MapPin, Inbox, Copy, Trash2, 
+    Heart, DollarSign, Loader2, Navigation, FileText, 
+    Shield, Star, Lock, Send, Search, CheckCircle
+} from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { PaymentService } from '../services/paymentService';
+
+// --- SUB-COMPONENT: SCR TACTICAL DASHBOARD ---
+const SCRDashboard = ({ user, neighborhood }: { user: User, neighborhood?: Neighborhood }) => {
+    const [patrolLoading, setPatrolLoading] = useState(false);
+    const [quickIncidents, setQuickIncidents] = useState<Alert[]>([]);
+    const [serviceRequests, setServiceRequests] = useState<ServiceRequest[]>([]);
+    
+    // Resident Selection Logic
+    const [residents, setResidents] = useState<User[]>([]);
+    const [isResidentModalOpen, setIsResidentModalOpen] = useState(false);
+    const [residentSearch, setResidentSearch] = useState('');
+    const [pendingAction, setPendingAction] = useState<{type: 'CHECKIN' | 'LOG' | 'PANIC', note?: string} | null>(null);
+
+    useEffect(() => {
+        const loadData = async () => {
+             // Carrega incidentes
+             const alerts = await MockService.getAlerts(user.neighborhoodId);
+             setQuickIncidents(alerts.slice(0, 3));
+
+             // Carrega solicitações VIP
+             if (user.neighborhoodId) {
+                 const requests = await MockService.getServiceRequests(user.neighborhoodId);
+                 setServiceRequests(requests.filter(r => r.status === 'PENDING'));
+                 
+                 // Pre-load residents for selector
+                 const users = await MockService.getUsers(user.neighborhoodId);
+                 
+                 // FILTRO: Apenas moradores do plano PREMIUM (PRÊMIO) aparecem para o SCR
+                 setResidents(users.filter(u => u.role === UserRole.RESIDENT && u.plan === 'PREMIUM'));
+             }
+        };
+        loadData();
+    }, [user.neighborhoodId]);
+
+    const initiateAction = (type: 'CHECKIN' | 'LOG' | 'PANIC', note?: string) => {
+        setPendingAction({ type, note });
+        setIsResidentModalOpen(true);
+    };
+
+    const confirmAction = async (targetUserId?: string) => {
+        if (!user.neighborhoodId || !pendingAction) return;
+        setIsResidentModalOpen(false);
+        setPatrolLoading(true);
+
+        const targetUser = residents.find(r => r.id === targetUserId);
+        const logNote = targetUser 
+            ? `${pendingAction.note || 'AÇÃO'} - Ref: ${targetUser.name} (${targetUser.address})`
+            : pendingAction.note || 'AÇÃO GERAL';
+
+        try {
+            if (pendingAction.type === 'CHECKIN') {
+                 if ('geolocation' in navigator) {
+                    navigator.geolocation.getCurrentPosition(async (position) => {
+                        await MockService.registerPatrol(
+                            user.id,
+                            user.neighborhoodId!,
+                            "RONDA PADRÃO - CHECK-IN",
+                            position.coords.latitude,
+                            position.coords.longitude,
+                            targetUserId
+                        );
+                        alert(`✅ Check-in registrado! ${targetUser ? `Notificação enviada para ${targetUser.name}.` : ''}`);
+                        setPatrolLoading(false);
+                    }, (error) => {
+                        alert("Erro de GPS: " + error.message);
+                        setPatrolLoading(false);
+                    });
+                } else {
+                    alert("GPS não suportado.");
+                    setPatrolLoading(false);
+                }
+            } else if (pendingAction.type === 'LOG') {
+                await MockService.registerPatrol(
+                    user.id, 
+                    user.neighborhoodId!, 
+                    `OCORRÊNCIA: ${pendingAction.note}`,
+                    undefined,
+                    undefined,
+                    targetUserId
+                );
+                alert(`📖 Ocorrência registrada! ${targetUser ? `Notificação enviada para ${targetUser.name}.` : ''}`);
+                setPatrolLoading(false);
+            } else if (pendingAction.type === 'PANIC') {
+                // For SCR Panic, we create a general alert but mention the resident in the note if selected
+                await MockService.createAlert({
+                    type: 'DANGER', // SCR panic is usually a danger report
+                    userId: user.id,
+                    userName: user.name,
+                    neighborhoodId: user.neighborhoodId!,
+                    userRole: UserRole.SCR,
+                    message: logNote
+                });
+                alert("🚨 Alerta de Perigo enviado à central!");
+                setPatrolLoading(false);
+            }
+        } catch (e) {
+            alert("Erro ao executar ação.");
+            setPatrolLoading(false);
+        }
+    };
+
+    const filteredResidents = residents.filter(r => 
+        r.name.toLowerCase().includes(residentSearch.toLowerCase()) ||
+        r.address?.toLowerCase().includes(residentSearch.toLowerCase())
+    );
+
+    return (
+        <Layout>
+            <div className="flex flex-col h-full gap-4">
+                <div className="bg-atalaia-neon/10 border-l-4 border-atalaia-neon p-4 rounded-r-lg mb-4">
+                    <h1 className="text-2xl font-black text-white tracking-tighter uppercase flex items-center gap-2">
+                        <ShieldCheckIcon /> PAINEL TÁTICO
+                    </h1>
+                    <p className="text-atalaia-neon font-mono text-xs uppercase tracking-widest">
+                        OPERADOR: {user.name} | POSTO: {neighborhood?.name || 'GLOBAL'}
+                    </p>
+                </div>
+
+                {/* BIG BUTTONS FOR GLOVED HANDS */}
+                <div className="grid grid-cols-2 gap-4 h-48">
+                    <button 
+                        onClick={() => initiateAction('CHECKIN')}
+                        disabled={patrolLoading}
+                        className="bg-green-700 hover:bg-green-600 active:bg-green-500 text-white rounded-xl border-2 border-green-500 shadow-[0_0_20px_rgba(21,128,61,0.5)] flex flex-col items-center justify-center gap-2 transition-all active:scale-95"
+                    >
+                        {patrolLoading ? <Loader2 className="animate-spin w-12 h-12" /> : <MapPin className="w-12 h-12" />}
+                        <span className="text-xl font-black uppercase">CHECK-IN RONDA</span>
+                    </button>
+
+                    <button 
+                        onClick={() => initiateAction('PANIC')}
+                        className="bg-red-700 hover:bg-red-600 active:bg-red-500 text-white rounded-xl border-2 border-red-500 shadow-[0_0_20px_rgba(185,28,28,0.5)] flex flex-col items-center justify-center gap-2 transition-all active:scale-95"
+                    >
+                        <AlertTriangle className="w-12 h-12" />
+                        <span className="text-xl font-black uppercase">REPORTAR PERIGO</span>
+                    </button>
+                </div>
+
+                <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mt-2">
+                    {/* VIP REQUESTS */}
+                    <Card className="p-4 bg-[#111] border-yellow-500/30">
+                        <h3 className="text-yellow-400 font-bold mb-4 flex items-center gap-2 uppercase text-sm">
+                            <Star size={16} fill="currentColor" /> Solicitações VIP (Premium)
+                        </h3>
+                        <div className="space-y-2">
+                            {serviceRequests.length === 0 ? (
+                                <p className="text-gray-600 italic text-xs">Nenhuma solicitação pendente.</p>
+                            ) : (
+                                serviceRequests.map(req => (
+                                    <div key={req.id} className="p-3 bg-yellow-900/10 border border-yellow-500/20 rounded flex justify-between items-center">
+                                        <div>
+                                            <p className="text-white font-bold text-sm">
+                                                {req.requestType === 'ESCORT' ? 'SOLICITAÇÃO DE ESCOLTA' : 
+                                                 req.requestType === 'EXTRA_ROUND' ? 'RONDA EXTRA NO LOCAL' : 'AVISO DE VIAGEM'}
+                                            </p>
+                                            <p className="text-gray-400 text-xs">Morador: {req.userName}</p>
+                                            <p className="text-gray-500 text-[10px]">{new Date(req.createdAt).toLocaleString()}</p>
+                                        </div>
+                                        <Badge color="yellow">PENDENTE</Badge>
+                                    </div>
+                                ))
+                            )}
+                        </div>
+                    </Card>
+
+                    {/* QUICK INCIDENTS */}
+                    <Card className="p-4 bg-[#111] border-gray-800">
+                        <h3 className="text-white font-bold mb-4 flex items-center gap-2 uppercase text-sm text-gray-400">
+                            <FileText size={16} /> Livro de Ocorrências Rápido
+                        </h3>
+                        <div className="grid grid-cols-2 gap-3">
+                            <button onClick={() => initiateAction('LOG', "PORTÃO ABERTO")} className="p-4 bg-gray-800 rounded border border-gray-700 hover:bg-gray-700 text-white font-bold text-sm">PORTÃO ABERTO</button>
+                            <button onClick={() => initiateAction('LOG', "LÂMPADA QUEIMADA")} className="p-4 bg-gray-800 rounded border border-gray-700 hover:bg-gray-700 text-white font-bold text-sm">LUZ QUEIMADA</button>
+                            <button onClick={() => initiateAction('LOG', "VEÍCULO SUSPEITO")} className="p-4 bg-gray-800 rounded border border-gray-700 hover:bg-gray-700 text-white font-bold text-sm">VEÍCULO SUSPEITO</button>
+                            <button onClick={() => initiateAction('LOG', "VIOLAÇÃO DE PERÍMETRO")} className="p-4 bg-gray-800 rounded border border-gray-700 hover:bg-gray-700 text-white font-bold text-sm">VIOLAÇÃO PERÍMETRO</button>
+                        </div>
+                    </Card>
+
+                    {/* RECENT ALERTS FEED */}
+                    <Card className="p-4 bg-[#111] border-gray-800">
+                         <h3 className="text-white font-bold mb-4 flex items-center gap-2 uppercase text-sm text-gray-400">
+                            <Activity size={16} /> Fila de Despacho (Últimos)
+                        </h3>
+                        <div className="space-y-2">
+                            {quickIncidents.map(alert => (
+                                <div key={alert.id} className={`p-3 rounded border-l-4 ${alert.type === 'PANIC' ? 'border-red-500 bg-red-900/20' : 'border-gray-500 bg-gray-900'}`}>
+                                    <div className="flex justify-between">
+                                        <span className="font-bold text-white">{alert.type}</span>
+                                        <span className="text-xs text-gray-400">{new Date(alert.timestamp).toLocaleTimeString()}</span>
+                                    </div>
+                                    <p className="text-xs text-gray-300 truncate">{alert.userName} - {alert.message || 'Sem detalhes'}</p>
+                                </div>
+                            ))}
+                            {quickIncidents.length === 0 && <p className="text-gray-600 italic">Sem incidentes recentes.</p>}
+                        </div>
+                    </Card>
+                </div>
+
+                {/* RESIDENT SELECTION MODAL */}
+                <Modal isOpen={isResidentModalOpen} onClose={() => setIsResidentModalOpen(false)}>
+                    <div className="p-4">
+                        <h2 className="text-xl font-bold text-white mb-2">Vincular Morador (VIP)</h2>
+                        <p className="text-gray-400 text-sm mb-4">
+                            Selecione o morador <strong>Premium</strong> relacionado a esta ocorrência.
+                            Apenas assinantes do plano Prêmio aparecem nesta lista.
+                        </p>
+
+                        <div className="relative mb-4">
+                            <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500" size={18} />
+                            <input 
+                                type="text" 
+                                placeholder="Buscar morador ou endereço..."
+                                value={residentSearch}
+                                onChange={(e) => setResidentSearch(e.target.value)}
+                                autoFocus
+                                className="w-full bg-black border border-gray-700 rounded-lg pl-10 pr-4 py-3 text-white focus:border-atalaia-neon focus:outline-none"
+                            />
+                        </div>
+
+                        <div className="max-h-60 overflow-y-auto space-y-2 mb-4">
+                            {filteredResidents.map(resident => (
+                                <div 
+                                    key={resident.id}
+                                    onClick={() => confirmAction(resident.id)}
+                                    className="p-3 bg-yellow-900/10 border border-yellow-500/20 rounded-lg hover:bg-yellow-500/10 hover:border-atalaia-neon cursor-pointer flex justify-between items-center group"
+                                >
+                                    <div>
+                                        <div className="flex items-center gap-2">
+                                            <p className="text-white font-bold text-sm">{resident.name}</p>
+                                            <Badge color="yellow">PRÊMIO</Badge>
+                                        </div>
+                                        <p className="text-gray-500 text-xs">{resident.address || 'Sem endereço'}</p>
+                                    </div>
+                                    <CheckCircle size={18} className="text-gray-600 group-hover:text-atalaia-neon" />
+                                </div>
+                            ))}
+                            {filteredResidents.length === 0 && <p className="text-center text-gray-500 py-4">Nenhum assinante Prêmio encontrado.</p>}
+                        </div>
+
+                        <Button onClick={() => confirmAction(undefined)} variant="secondary" className="w-full">
+                            Pular Seleção (Registro Geral)
+                        </Button>
+                    </div>
+                </Modal>
+            </div>
+        </Layout>
+    )
+}
+
+const ShieldCheckIcon = () => (
+    <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><path d="m9 12 2 2 4-4"/></svg>
+)
 
 const Dashboard: React.FC = () => {
   const { user } = useAuth();
@@ -23,6 +278,9 @@ const Dashboard: React.FC = () => {
   const [neighborhoodIntegrator, setNeighborhoodIntegrator] = useState<User | null>(null);
   const [processingDonation, setProcessingDonation] = useState(false);
 
+  // Upgrade Modal for SCR feature
+  const [showSCRUpgradeModal, setShowSCRUpgradeModal] = useState(false);
+
   useEffect(() => {
     const fetchData = async () => {
       // Fetch alerts
@@ -36,7 +294,7 @@ const Dashboard: React.FC = () => {
         setStats(prev => ({ ...prev, cameras: hoods.length, users: 154 })); // Mock user count
         
         // Fetch Admin Notifications
-        const notifs = await MockService.getNotifications();
+        const notifs = await MockService.getNotifications(); // All notifications for admin
         setNotifications(notifs);
 
       } else if (user?.neighborhoodId) {
@@ -49,11 +307,20 @@ const Dashboard: React.FC = () => {
             const integrator = await MockService.getNeighborhoodIntegrator(user.neighborhoodId);
             setNeighborhoodIntegrator(integrator);
         }
+
+        // Fetch user notifications
+        const myNotifs = await MockService.getNotifications(user.id);
+        setNotifications(myNotifs.filter(n => !n.read));
       }
     };
 
     fetchData();
   }, [user]);
+
+  // --- RENDER TACTICAL DASHBOARD FOR SCR ---
+  if (user?.role === UserRole.SCR) {
+      return <SCRDashboard user={user} neighborhood={myNeighborhood} />;
+  }
 
   const handleDeleteNotification = async (id: string) => {
     if (window.confirm('Tem certeza que deseja excluir esta notificação?')) {
@@ -82,6 +349,23 @@ const Dashboard: React.FC = () => {
       } catch (error: any) {
           alert('Erro ao processar doação: ' + error.message);
           setProcessingDonation(false);
+      }
+  };
+
+  const handleRequestService = async (type: 'ESCORT' | 'EXTRA_ROUND' | 'TRAVEL_NOTICE') => {
+      if (!user || !user.neighborhoodId) return;
+      if (user.plan !== 'PREMIUM') {
+          setShowSCRUpgradeModal(true);
+          return;
+      }
+
+      if (window.confirm("Confirmar solicitação ao Motovigia?")) {
+          try {
+              await MockService.createServiceRequest(user.id, user.name, user.neighborhoodId, type);
+              alert("Solicitação enviada ao SCR com sucesso!");
+          } catch (e) {
+              alert("Erro ao enviar solicitação.");
+          }
       }
   };
 
@@ -150,38 +434,43 @@ const Dashboard: React.FC = () => {
           </div>
       )}
 
-      {/* Stats Row */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
-        <StatCard 
-          icon={AlertTriangle} 
-          label="Alertas (24h)" 
-          value={stats.alerts} 
-          color="bg-red-500/20" 
-        />
-        <StatCard 
-          icon={Video} 
-          label="Câmeras Ativas" 
-          value={stats.cameras} 
-          color="bg-atalaia-neon/20" 
-        />
-        <StatCard 
-          icon={Users} 
-          label="Membros Online" 
-          value={stats.users} 
-          color="bg-blue-500/20" 
-        />
-      </div>
+      {/* VIP SUPPORT CARD (Only for PREMIUM Residents) */}
+      {user?.plan === 'PREMIUM' && user?.role === UserRole.RESIDENT && (
+        <Card className="p-6 mb-8 border-yellow-500/30 bg-yellow-500/5 animate-in slide-in-from-top-4">
+            <h2 className="text-xl font-bold flex items-center gap-2 mb-4 text-white">
+                <Star className="text-yellow-500" size={20} fill="currentColor" />
+                Apoio Tático VIP
+            </h2>
+            <p className="text-sm text-gray-400 mb-6">
+                Como assinante Prêmio, você tem acesso direto à equipe de Motovigia (SCR) para serviços exclusivos.
+            </p>
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                 <Button onClick={() => handleRequestService('ESCORT')} className="bg-yellow-600/20 border border-yellow-500/50 hover:bg-yellow-600/40 text-yellow-500 font-bold">
+                     <Shield size={18} className="mr-2"/> Solicitar Escolta
+                 </Button>
+                 <Button onClick={() => handleRequestService('EXTRA_ROUND')} className="bg-yellow-600/20 border border-yellow-500/50 hover:bg-yellow-600/40 text-yellow-500 font-bold">
+                     <Navigation size={18} className="mr-2"/> Ronda Extra no Local
+                 </Button>
+                 <Button onClick={() => handleRequestService('TRAVEL_NOTICE')} className="bg-yellow-600/20 border border-yellow-500/50 hover:bg-yellow-600/40 text-yellow-500 font-bold">
+                     <MapPin size={18} className="mr-2"/> Aviso de Viagem
+                 </Button>
+            </div>
+        </Card>
+      )}
 
-      {/* ADMIN NOTIFICATIONS (Only visible to Admin) */}
-      {user?.role === UserRole.ADMIN && notifications.length > 0 && (
+      {/* NOTIFICATIONS FEED */}
+      {notifications.length > 0 && (
           <Card className="p-6 mb-8 border-atalaia-neon/30 bg-atalaia-neon/5">
               <h2 className="text-xl font-bold flex items-center gap-2 mb-4 text-white">
                   <Inbox className="text-atalaia-neon" size={20} />
-                  Notificações do Sistema
+                  Minhas Notificações
                   <Badge color="green">{notifications.length}</Badge>
               </h2>
               <div className="space-y-4">
-                  {notifications.map(notif => (
+                  {notifications
+                    // FILTER: Hide protocol submissions from non-admins
+                    .filter(notif => user?.role === UserRole.ADMIN || notif.type !== 'PROTOCOL_SUBMISSION')
+                    .map(notif => (
                       <div key={notif.id} className="bg-black/50 p-4 rounded-lg border border-white/10 group">
                           <div className="flex justify-between items-start mb-2">
                               <div>
@@ -295,6 +584,25 @@ const Dashboard: React.FC = () => {
           </div>
         </Card>
       </div>
+
+       {/* Modal Upgrade for SCR */}
+       <Modal isOpen={showSCRUpgradeModal} onClose={() => setShowSCRUpgradeModal(false)}>
+           <div className="p-4 text-center">
+               <div className="w-16 h-16 bg-yellow-500 rounded-full flex items-center justify-center mx-auto mb-4">
+                   <Star size={32} fill="white" className="text-white" />
+               </div>
+               <h2 className="text-2xl font-bold text-white mb-2">Desbloqueie o Suporte SCR</h2>
+               <p className="text-gray-400 mb-6">
+                   O serviço de Apoio Tático Motovigia (Escolta, Rondas Extras) é exclusivo para assinantes do <strong>Plano Prêmio</strong>.
+               </p>
+               <Button onClick={() => {
+                   window.location.href = '#/cameras'; // Redirect to cameras page where upgrade modal exists or trigger payment flow directly
+                   setShowSCRUpgradeModal(false);
+               }} className="w-full">
+                   Fazer Upgrade para Prêmio
+               </Button>
+           </div>
+       </Modal>
     </Layout>
   );
 };

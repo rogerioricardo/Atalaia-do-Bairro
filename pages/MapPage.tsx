@@ -3,7 +3,7 @@ import React, { useEffect, useState } from 'react';
 import Layout from '../components/Layout';
 import { MapContainer, TileLayer, Marker, Popup, useMap } from 'react-leaflet';
 import { MockService } from '../services/mockService';
-import { User, Neighborhood } from '../types';
+import { User, Neighborhood, UserRole } from '../types';
 import L from 'leaflet';
 import { useAuth } from '../context/AuthContext';
 import { Layers, Sun, Moon, Globe, Video } from 'lucide-react';
@@ -28,6 +28,16 @@ const CameraIcon = L.divIcon({
            </div>`,
     iconSize: [30, 30],
     iconAnchor: [15, 15]
+});
+
+// Custom MOTO Icon for SCR markers (Yellow/Neon)
+const MotoIcon = L.divIcon({
+    className: 'custom-moto-marker',
+    html: `<div style="background-color: #EAB308; width: 32px; height: 32px; border-radius: 50%; display: flex; align-items: center; justify-content: center; box-shadow: 0 0 15px rgba(234, 179, 8, 0.8); border: 2px solid #000;">
+            <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="black" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="5.5" cy="17.5" r="3.5"/><circle cx="18.5" cy="17.5" r="3.5"/><path d="M15 6h-5a1 1 0 0 0-1 1v4h12V7a1 1 0 0 0-1-1z"/><path d="M12 11v6"/><path d="M5.5 17.5h13"/></svg>
+           </div>`,
+    iconSize: [32, 32],
+    iconAnchor: [16, 16]
 });
 
 const MAP_STYLES = {
@@ -79,13 +89,16 @@ const MapPage: React.FC = () => {
 
   useEffect(() => {
     const fetchData = async () => {
-        const usersData = await MockService.getUsers();
+        // Fetch users from my neighborhood only (except Admin)
+        const targetHood = user?.role === UserRole.ADMIN ? undefined : user?.neighborhoodId;
+        const usersData = await MockService.getUsers(targetHood);
         setUsers(usersData);
+        
         const hoodsData = await MockService.getNeighborhoods();
         setNeighborhoods(hoodsData);
     };
     fetchData();
-  }, []);
+  }, [user]);
 
   return (
     <Layout>
@@ -114,12 +127,21 @@ const MapPage: React.FC = () => {
                 {/* User Markers */}
                 {users.map((u) => (
                     u.lat && u.lng && (
-                        <Marker key={`user-${u.id}`} position={[u.lat, u.lng]}>
+                        <Marker 
+                            key={`user-${u.id}`} 
+                            position={[u.lat, u.lng]}
+                            icon={u.role === UserRole.SCR ? MotoIcon : DefaultIcon} // SCR gets Moto Icon
+                        >
                             <Popup className="text-black">
                                 <strong className="block text-sm mb-1">{u.name}</strong>
-                                <span className="text-xs uppercase bg-gray-200 px-1 rounded">
+                                <span className={`text-xs uppercase px-1 rounded ${u.role === UserRole.SCR ? 'bg-yellow-400 font-bold' : 'bg-gray-200'}`}>
                                     {u.role ? roleNames[u.role] : u.role}
                                 </span>
+                                {u.role === UserRole.SCR && (
+                                    <div className="text-[10px] text-gray-500 mt-1 italic">
+                                        Em deslocamento tático
+                                    </div>
+                                )}
                             </Popup>
                         </Marker>
                     )
@@ -172,8 +194,14 @@ const MapPage: React.FC = () => {
                 <h4 className="font-bold text-white mb-2 uppercase">Legenda</h4>
                 <div className="space-y-2">
                     <div className="flex items-center gap-2">
+                         <div className="w-6 h-6 rounded-full bg-yellow-500 border border-black flex items-center justify-center shadow-[0_0_5px_rgba(234,179,8,0.5)]">
+                             <div className="w-4 h-1 bg-black rounded" />
+                        </div>
+                        <span className="text-yellow-400 font-bold">Motovigia (SCR)</span>
+                    </div>
+                    <div className="flex items-center gap-2">
                         <img src={iconUrl} className="w-4 h-6 opacity-80" alt="marker" />
-                        <span className="text-gray-300">Usuários Ativos</span>
+                        <span className="text-gray-300">Moradores</span>
                     </div>
                     <div className="flex items-center gap-2">
                         <div className="w-4 h-4 rounded-full bg-atalaia-neon border border-black flex items-center justify-center shadow-[0_0_5px_rgba(0,255,102,0.5)]">

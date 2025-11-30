@@ -168,8 +168,11 @@ const Cameras: React.FC = () => {
       : filteredNeighborhoods.slice(0, 4);
 
   // Admin and Integrator always have access, otherwise check plan
-  // Se for Admin ou Integrador, libera geral. Se for morador, checa se pagou.
-  const isLocked = user?.role !== UserRole.ADMIN && user?.role !== UserRole.INTEGRATOR && user?.plan === 'FREE';
+  // Se for Admin, Integrador ou SCR (Motovigia), libera geral. Se for morador, checa se pagou.
+  const isLocked = user?.role !== UserRole.ADMIN && 
+                   user?.role !== UserRole.INTEGRATOR && 
+                   user?.role !== UserRole.SCR && 
+                   user?.plan === 'FREE';
 
   const UniversalPlayer = ({ url }: { url: string }) => {
     // Basic detection for direct video files vs embeds
