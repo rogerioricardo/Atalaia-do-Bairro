@@ -1,12 +1,13 @@
 
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { ShieldCheck, Zap, MessageSquare, Users, MapPin, Bell, Clock, BarChart3, MessageCircle, Menu, X, Lock, CreditCard, Smartphone, Download } from 'lucide-react';
-import { Button } from '../components/UI';
+import { ShieldCheck, Zap, MessageSquare, Users, MapPin, Bell, Clock, BarChart3, MessageCircle, Menu, X, Lock, CreditCard, Smartphone, Download, Printer, Video } from 'lucide-react';
+import { Button, Modal } from '../components/UI';
 
 const Landing: React.FC = () => {
   const navigate = useNavigate();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const [plateModalOpen, setPlateModalOpen] = useState(false);
 
   // Lógica para pular a Landing Page se estiver rodando dentro do App (Capacitor)
   useEffect(() => {
@@ -26,10 +27,14 @@ const Landing: React.FC = () => {
     }
   };
 
+  const handlePrintPlate = () => {
+      window.print();
+  };
+
   return (
     <div className="min-h-screen bg-[#050505] text-white font-sans overflow-x-hidden">
       {/* Navbar */}
-      <nav className="fixed w-full z-50 bg-[#050505]/90 backdrop-blur-md border-b border-white/10">
+      <nav className="fixed w-full z-50 bg-[#050505]/90 backdrop-blur-md border-b border-white/10 print:hidden">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="flex items-center justify-between h-20">
             <div className="flex items-center gap-2">
@@ -42,6 +47,9 @@ const Landing: React.FC = () => {
               <button onClick={() => scrollToSection('como-funciona')} className="text-gray-300 hover:text-white transition-colors">Como funciona</button>
               <button onClick={() => scrollToSection('funcionalidades')} className="text-gray-300 hover:text-white transition-colors">Funcionalidades</button>
               <button onClick={() => scrollToSection('planos')} className="text-gray-300 hover:text-white transition-colors">Planos</button>
+              <button onClick={() => setPlateModalOpen(true)} className="flex items-center gap-2 text-atalaia-neon hover:text-white transition-colors border border-atalaia-neon/30 px-3 py-1.5 rounded-full hover:bg-atalaia-neon hover:border-atalaia-neon hover:text-black">
+                  <Download size={14} /> Baixar Placa
+              </button>
             </div>
             
             <div className="hidden md:flex items-center gap-4">
@@ -70,6 +78,9 @@ const Landing: React.FC = () => {
              <button onClick={() => scrollToSection('como-funciona')} className="text-left text-base font-medium text-gray-300 hover:text-atalaia-neon py-2">Como funciona</button>
              <button onClick={() => scrollToSection('funcionalidades')} className="text-left text-base font-medium text-gray-300 hover:text-atalaia-neon py-2">Funcionalidades</button>
              <button onClick={() => scrollToSection('planos')} className="text-left text-base font-medium text-gray-300 hover:text-atalaia-neon py-2">Planos</button>
+             <button onClick={() => { setPlateModalOpen(true); setMobileMenuOpen(false); }} className="text-left text-base font-medium text-atalaia-neon py-2 flex items-center gap-2">
+                 <Download size={18} /> Baixar Modelo de Placa
+             </button>
              <hr className="border-white/10 my-2" />
              <Button onClick={handleLogin} variant="primary" className="w-full justify-center py-3 font-bold">
                  Login
@@ -79,7 +90,7 @@ const Landing: React.FC = () => {
       </nav>
 
       {/* Hero Section */}
-      <section className="relative h-screen min-h-[600px] flex items-center justify-center pt-20 overflow-hidden">
+      <section className="relative h-screen min-h-[600px] flex items-center justify-center pt-20 overflow-hidden print:hidden">
         {/* Background Image with Overlay */}
         <div className="absolute inset-0 z-0">
           <img 
@@ -117,7 +128,7 @@ const Landing: React.FC = () => {
       </section>
 
       {/* Seção Como Funciona */}
-      <section id="como-funciona" className="py-16 md:py-24 bg-[#0a0a0a]">
+      <section id="como-funciona" className="py-16 md:py-24 bg-[#0a0a0a] print:hidden">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="text-center mb-12 md:mb-16">
             <h2 className="text-3xl md:text-4xl font-bold text-white mb-4">Como funciona?</h2>
@@ -160,7 +171,7 @@ const Landing: React.FC = () => {
       </section>
 
       {/* Seção Funcionalidades */}
-      <section id="funcionalidades" className="py-16 md:py-24 bg-[#050505] border-t border-white/5">
+      <section id="funcionalidades" className="py-16 md:py-24 bg-[#050505] border-t border-white/5 print:hidden">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="text-center mb-12 md:mb-16">
             <h2 className="text-3xl md:text-4xl font-bold text-white mb-4">Funcionalidades</h2>
@@ -190,8 +201,8 @@ const Landing: React.FC = () => {
         </div>
       </section>
 
-      {/* ---- ANÚNCIO DO APP ANDROID (NOVA SEÇÃO) ---- */}
-      <section className="py-12 bg-gradient-to-r from-[#0d1410] to-[#0a0a0a] border-y border-atalaia-neon/20">
+      {/* ---- ANÚNCIO DO APP ANDROID ---- */}
+      <section className="py-12 bg-gradient-to-r from-[#0d1410] to-[#0a0a0a] border-y border-atalaia-neon/20 print:hidden">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
             <div className="flex flex-col md:flex-row items-center justify-between gap-8">
                 <div className="flex-1">
@@ -217,27 +228,51 @@ const Landing: React.FC = () => {
                     </div>
                 </div>
                 
-                {/* Visual Mockup */}
-                <div className="relative w-full max-w-sm md:w-1/3 aspect-[9/16] bg-black border-4 border-gray-800 rounded-[2.5rem] shadow-2xl overflow-hidden flex items-center justify-center">
-                    <div className="absolute top-0 left-1/2 -translate-x-1/2 w-1/3 h-6 bg-black rounded-b-2xl z-20"></div>
-                    <div className="absolute inset-0 bg-[#111] flex flex-col items-center justify-center z-10 p-6 text-center">
-                         <ShieldCheck className="text-atalaia-neon mb-4" size={64} />
-                         <h3 className="text-2xl font-bold text-white mb-2">ATALAIA</h3>
-                         <p className="text-gray-500 text-sm">App Mobile</p>
-                         <div className="mt-8 w-full space-y-3">
-                             <div className="h-10 w-full bg-atalaia-neon rounded-lg opacity-20"></div>
-                             <div className="h-10 w-full bg-gray-800 rounded-lg"></div>
-                         </div>
+                {/* Visual Mockup - REAL LOGIN SCREEN SIMULATION */}
+                <div className="relative w-full max-w-sm md:w-1/3 aspect-[9/16] bg-[#050505] border-[8px] border-[#1a1a1a] rounded-[2.5rem] shadow-2xl overflow-hidden flex flex-col">
+                    {/* Status Bar / Notch */}
+                    <div className="w-full h-8 bg-black z-20 flex justify-center shrink-0">
+                        <div className="w-1/3 h-5 bg-[#1a1a1a] rounded-b-xl"></div>
                     </div>
-                    {/* Glow effect behind phone */}
-                    <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-full h-full bg-atalaia-neon/20 blur-[80px] -z-10 pointer-events-none"></div>
+                    
+                    {/* Screen Content: REAL LOGIN INTERFACE */}
+                    <div className="flex-1 flex flex-col items-center justify-center p-6 relative z-10 w-full">
+                        {/* Background Blur Effect */}
+                        <div className="absolute top-[-20%] right-[-10%] w-[200px] h-[200px] bg-atalaia-neon/10 rounded-full blur-[50px]" />
+                        
+                        {/* Logo Area */}
+                        <div className="w-14 h-14 rounded-2xl bg-atalaia-neon/10 text-atalaia-neon flex items-center justify-center mb-4 border border-atalaia-neon/20 shadow-[0_0_15px_rgba(0,255,102,0.2)]">
+                             <ShieldCheck size={32} />
+                        </div>
+                        <h3 className="text-xl font-bold text-white mb-1">Acesso Atalaia</h3>
+                        <p className="text-gray-500 text-[10px] mb-8">Entre para monitorar.</p>
+
+                        {/* Fake Form */}
+                        <div className="w-full space-y-4 mb-6">
+                            <div>
+                                <label className="text-[10px] text-gray-500 uppercase font-bold mb-1 block">Email</label>
+                                <div className="h-10 w-full bg-[#111] border border-gray-800 rounded-lg flex items-center px-3 text-xs text-gray-400">usuario@atalaia.com</div>
+                            </div>
+                            <div>
+                                <label className="text-[10px] text-gray-500 uppercase font-bold mb-1 block">Senha</label>
+                                <div className="h-10 w-full bg-[#111] border border-gray-800 rounded-lg flex items-center px-3 text-xs text-gray-400">••••••••</div>
+                            </div>
+                        </div>
+
+                        {/* Fake Button */}
+                        <div className="h-12 w-full bg-atalaia-neon rounded-lg shadow-[0_0_15px_rgba(0,255,102,0.3)] flex items-center justify-center mb-6">
+                             <span className="text-black font-bold text-sm">Entrar no Sistema</span>
+                        </div>
+                        
+                        <p className="text-[10px] text-gray-600">Não tem conta? <span className="text-gray-400">Crie agora</span></p>
+                    </div>
                 </div>
             </div>
         </div>
       </section>
 
       {/* Planos */}
-      <section id="planos" className="py-16 md:py-24 bg-[#0a0a0a]">
+      <section id="planos" className="py-16 md:py-24 bg-[#0a0a0a] print:hidden">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="text-center mb-12 md:mb-16">
             <h2 className="text-3xl md:text-4xl font-bold text-white mb-4">Escolha seu Plano</h2>
@@ -376,7 +411,7 @@ const Landing: React.FC = () => {
       </section>
 
       {/* CTA Final */}
-      <section className="py-16 md:py-20 bg-gradient-to-b from-[#050505] to-[#0a1f0a] border-t border-white/5">
+      <section className="py-16 md:py-20 bg-gradient-to-b from-[#050505] to-[#0a1f0a] border-t border-white/5 print:hidden">
         <div className="max-w-4xl mx-auto px-4 text-center">
           <h2 className="text-3xl md:text-5xl font-bold text-white mb-6">
             Transforme sua rua em um território seguro.<br/>
@@ -389,7 +424,7 @@ const Landing: React.FC = () => {
       </section>
 
       {/* Footer */}
-      <footer className="py-12 bg-[#0e0e0e] border-t border-white/5 text-gray-400 text-sm">
+      <footer className="py-12 bg-[#0e0e0e] border-t border-white/5 text-gray-400 text-sm print:hidden">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 grid grid-cols-1 md:grid-cols-4 gap-8">
           <div>
             <div className="flex items-center gap-2 mb-4">
@@ -426,6 +461,109 @@ const Landing: React.FC = () => {
           © 2025 ATALAIA – Segurança Colaborativa. Por Alien Monitoramento Eletrônico Ltada Todos os direitos reservados.
         </div>
       </footer>
+
+      {/* MODAL DE PLACA DE SEGURANÇA */}
+      <Modal isOpen={plateModalOpen} onClose={() => setPlateModalOpen(false)}>
+          {/* Print CSS Injection */}
+          <style>{`
+            @media print {
+              body * {
+                visibility: hidden;
+              }
+              #security-plate, #security-plate * {
+                visibility: visible;
+              }
+              #security-plate {
+                position: fixed;
+                left: 50%;
+                top: 50%;
+                transform: translate(-50%, -50%);
+                width: 100%;
+                max-width: 20cm; /* Approx size */
+                height: auto;
+                margin: 0;
+                padding: 2rem;
+                background-color: black !important;
+                -webkit-print-color-adjust: exact;
+                print-color-adjust: exact;
+                z-index: 9999;
+                border: 6px solid #00FF66 !important;
+              }
+            }
+          `}</style>
+
+          <div className="flex flex-col items-center justify-center p-8 bg-[#0a0a0a]">
+              <h2 className="text-2xl font-bold text-white mb-2 print:hidden">Modelo de Placa</h2>
+              <p className="text-gray-400 text-sm mb-4 text-center print:hidden">
+                  Utilize este design para imprimir em placas de PS ou Metal.
+              </p>
+              
+              <div className="mb-6 flex items-center justify-center gap-2 bg-atalaia-neon/10 border border-atalaia-neon/30 text-atalaia-neon px-4 py-2 rounded-lg text-xs font-bold uppercase tracking-wider print:hidden">
+                  ⚠ Padrão de Impressão: 20cm x 30cm (Proporção 2:3)
+              </div>
+
+              {/* AREA DE IMPRESSÃO - PLACA FUTURISTA 20x30cm (2:3 aspect) */}
+              <div 
+                  id="security-plate"
+                  className="w-full max-w-[300px] aspect-[2/3] bg-black border-[6px] border-atalaia-neon rounded-xl flex flex-col items-center justify-between p-6 relative shadow-[0_0_60px_rgba(0,255,102,0.2)] overflow-hidden"
+              >
+                  {/* Scanline Effect - hidden in print usually but kept just in case */}
+                  <div className="absolute inset-0 bg-[linear-gradient(transparent_50%,rgba(0,255,102,0.05)_50%)] bg-[length:100%_4px] pointer-events-none print:hidden" />
+                  
+                  {/* Top Warning */}
+                  <div className="w-full text-center relative z-10 mt-2">
+                      <div className="inline-block bg-atalaia-neon text-black font-black text-lg px-6 py-1 rounded-sm mb-3 tracking-[0.2em] uppercase transform -skew-x-12 print:bg-[#00FF66]">
+                          ATENÇÃO
+                      </div>
+                      <h3 className="text-white font-black text-3xl uppercase tracking-tighter leading-none mb-2">ÁREA<br/><span className="text-atalaia-neon text-4xl">PROTEGIDA</span></h3>
+                  </div>
+
+                  {/* FRASE DE MONITORAMENTO */}
+                  <div className="relative z-10 bg-atalaia-neon/10 w-[120%] py-1.5 transform -skew-x-12 border-y border-atalaia-neon/30 mb-2">
+                      <p className="text-atalaia-neon font-black text-[11px] text-center uppercase tracking-[0.15em] transform skew-x-12 px-6">
+                          ÁREA MONITORADA POR MORADORES
+                      </p>
+                  </div>
+
+                  {/* Central Icon */}
+                  <div className="relative z-10 my-2">
+                      <div className="w-24 h-24 border-4 border-atalaia-neon rounded-full flex items-center justify-center bg-black/50 backdrop-blur shadow-[0_0_30px_rgba(0,255,102,0.4)] print:bg-black print:shadow-none">
+                          <ShieldCheck size={48} className="text-atalaia-neon" />
+                      </div>
+                  </div>
+
+                  {/* Bottom Info with QR */}
+                  <div className="w-full text-center relative z-10 flex flex-col items-center justify-end flex-1">
+                      <h4 className="text-white font-bold text-2xl tracking-[0.3em] mb-3">ATALAIA</h4>
+                      
+                      <div className="bg-white p-2 rounded-lg shadow-[0_0_15px_rgba(255,255,255,0.2)] mb-1">
+                          <img 
+                            src="https://api.qrserver.com/v1/create-qr-code/?size=150x150&data=https://atalaia.cloud" 
+                            alt="QR Code" 
+                            className="w-16 h-16"
+                          />
+                      </div>
+                      <p className="text-[9px] text-gray-500 uppercase tracking-wider font-bold mt-1">Acesse para Monitorar</p>
+                  </div>
+
+                  {/* Decorative Elements */}
+                  <div className="absolute top-3 left-3 w-2 h-2 bg-atalaia-neon rounded-full" />
+                  <div className="absolute top-3 right-3 w-2 h-2 bg-atalaia-neon rounded-full" />
+                  <div className="absolute bottom-3 left-3 w-2 h-2 bg-atalaia-neon rounded-full" />
+                  <div className="absolute bottom-3 right-3 w-2 h-2 bg-atalaia-neon rounded-full" />
+              </div>
+
+              <div className="mt-8 w-full flex gap-4 max-w-md print:hidden">
+                  <Button variant="outline" onClick={() => setPlateModalOpen(false)} className="flex-1">
+                      Fechar
+                  </Button>
+                  <Button onClick={handlePrintPlate} className="flex-1">
+                      <Printer size={18} className="mr-2" /> Imprimir
+                  </Button>
+              </div>
+          </div>
+      </Modal>
+
     </div>
   );
 };
